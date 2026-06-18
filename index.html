@@ -495,12 +495,12 @@
 
                 <div class="p-4 bg-zinc-900/60 border border-zinc-800/80 rounded-xl text-left space-y-2">
                     <h4 class="text-xs font-bold text-zinc-300 uppercase tracking-widest flex items-center gap-1.5">
-                        <i class="fa-solid fa-circle-nodes text-red-500"></i> Cooperação Real Multijogador:
+                        <i class="fa-solid fa-circle-nodes text-red-500"></i> Inteligência Artificial e Cooperação:
                     </h4>
                     <p class="text-[11px] text-zinc-400 leading-normal">
-                        • <b>Mesmo Canal Ativo:</b> Todos os agentes no mesmo rádio jogam juntos cooperativamente!<br>
-                        • <b>Lanternas Táticas:</b> A iluminação dos seus parceiros de infiltração ajuda a clarear o cenário para você.<br>
-                        • <b>Cuidado ao Correr:</b> Correr gera muito ruído mecânico e expõe seu sinal nos radares.
+                        • <b>IA Avançada:</b> Guardas agora contornam paredes de forma fluida, varrem áreas com lanternas, investigam arbustos se ouvirem barulho e reagem à queda de câmeras pelo rádio!<br>
+                        • <b>Rádio Alerta:</b> Se um guarda te avistar, ele chama aliados próximos para fazer um cerco tático.<br>
+                        • <b>Cuidado ao Correr:</b> Correr gera muito ruído mecânico e expõe seu sinal nos radares inimigos.
                     </p>
                 </div>
 
@@ -948,7 +948,6 @@ function setupMultiplayer() {
             try {
                 const payload = JSON.parse(message.toString());
                 
-                // Trata echos de latência do ping tático
                 if (topic.startsWith(`stjames/coop/rooms/pingresponse/${myUid}/`)) {
                     const serverId = topic.replace(`stjames/coop/rooms/pingresponse/${myUid}/`, '');
                     const sentTime = payload.sentTime;
@@ -970,7 +969,6 @@ function setupMultiplayer() {
                     const senderId = topic.split('/').pop();
                     if (senderId !== myUid) {
                         if (payload.type === 'state') {
-                            // Salva a última posição conhecida do jogador e as novas coordenadas de rede (alvos)
                             const existing = playersInLobby[senderId];
                             playersInLobby[senderId] = {
                                 uid: senderId,
@@ -979,7 +977,6 @@ function setupMultiplayer() {
                                 targetX: payload.x,
                                 targetY: payload.y,
                                 targetAngle: payload.angle,
-                                // Inicializa com a coordenada recebida se for novo para evitar pulos na tela
                                 x: existing ? existing.x : payload.x,
                                 y: existing ? existing.y : payload.y,
                                 angle: existing ? existing.angle : payload.angle,
@@ -1320,7 +1317,6 @@ const player = {
     inSmoke: false 
 };
 
-const keys = {};
 let distractions = [];
 let particles = [];
 let items = [];
@@ -1339,7 +1335,6 @@ let aimTargetX = 0;
 let aimTargetY = 0;
 let flyingStones = [];
 
-// Variáveis da Cutscene Estendida
 let cutsceneFrame = 0;
 let cutsceneTimeline = 0;
 let cutsceneYachtX = 100;
@@ -1778,17 +1773,139 @@ class Guard {
         this.x = x; this.y = y; this.patrolPoints = patrolPoints;
         this.currentPointIdx = 0; this.speed = speed; this.baseSpeed = speed;
         this.angle = 0; this.radius = 13;
-        this.state = 'PATROL'; 
+        this.state = 'PATROL'; // PATROL, INVESTIGATING, CHASING
         this.targetX = x; this.targetY = y;
         this.investigateTimer = 0;
         this.viewAngle = Math.PI / 4.2;
         this.viewDistance = 210;
         this.alertTimer = 0;
+        this.sentrySweepTimer = Math.random() * 100;
+    }
+
+    // Calcula força para contornar paredes dinamicamente (Steering Obstacle Avoidance)
+    getSteeringForce(targetX, targetY) {
+        let dx = targetX - this.x;
+        let dy = targetY - this.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist === 0) return {x: 0, y: 0};
+        
+        let dirX = dx / dist;
+        let dirY = dy / dist;
+        
+        // Emite 3 raios visuais à frente do guarda para verificar paredes
+        let avoidDist = 65;
+        let leftRayX = this.x + Math.cos(this.angle - 0.45) * avoidDist;
+        let leftRayY = this.y + Math.sin(this.angle - 0.45) * avoidDist;
+        let rightRayX = this.x + Math.cos(this.angle + 0.45) * avoidDist;
+        let rightRayY = this.y + Math.sin(this.angle + 0.45) * avoidDist;
+        let centerRayX = this.x + Math.cos(this.angle) * avoidDist;
+        let centerRayY = this.y + Math.sin(this.angle) * avoidDist;
+        
+        let forceX = 0;
+        let forceY = 0;
+        let hit = false;
+        
+        for (let wall of walls) {
+            if (circleRectCollision(centerRayX, centerRayY, 12, wall)) {
+                let wallCenterX = wall.x + wall.w / 2;
+                let wallCenterY = wall.y + wall.h / 2;
+                forceX += (this.x - wallCenterX) * 0.7;
+                forceY += (this.y - wallCenterY) * 0.7;
+                hit = true;
+            }
+            if (circleRectCollision(leftRayX, leftRayY, 12, wall)) {
+                forceX += Math.cos(this.angle + Math.PI/2) * 12;
+                forceY += Math.sin(this.angle + Math.PI/2) * 12;
+                hit = true;
+            }
+            if (circleRectCollision(rightRayX, rightRayY, 12, wall)) {
+                forceX += Math.cos(this.angle - Math.PI/2) * 12;
+                forceY += Math.sin(this.angle - Math.PI/2) * 12;
+                hit = true;
+            }
+        }
+        
+        if (hit) {
+            let totalX = dirX * 1.2 + forceX * 1.8;
+            let totalY = dirY * 1.2 + forceY * 1.8;
+            let len = Math.sqrt(totalX*totalX + totalY*totalY);
+            return {x: totalX / len, y: totalY / len};
+        }
+        
+        return {x: dirX, y: dirY};
+    }
+
+    // Comunicação tática via rádio com outros guardas próximos
+    radioAlertNearbyGuards(radius) {
+        guards.forEach(other => {
+            if (other === this) return;
+            let dx = other.x - this.x;
+            let dy = other.y - this.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < radius) {
+                if (other.state === 'PATROL') {
+                    other.state = 'INVESTIGATING';
+                    other.targetX = this.x + (Math.random() - 0.5) * 60;
+                    other.targetY = this.y + (Math.random() - 0.5) * 60;
+                    other.investigateTimer = 220; 
+                    other.speed = other.baseSpeed * 1.35;
+                    createAlertParticle(other.x, other.y, "RÁDIO: REFORÇO SOLICITADO!");
+                }
+            }
+        });
+    }
+
+    // Verifica se alguma câmera ou holofote próximo foi desativado (EMP)
+    checkDisabledElectronics() {
+        if (this.state !== 'PATROL') return;
+        
+        for (let cam of securityCameras) {
+            if (cam.disabled) {
+                let dx = cam.x - this.x;
+                let dy = cam.y - this.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < 260) { 
+                    this.state = 'INVESTIGATING';
+                    this.targetX = cam.x;
+                    this.targetY = cam.y;
+                    this.investigateTimer = 160;
+                    this.speed = this.baseSpeed * 1.15;
+                    createAlertParticle(this.x, this.y, "CÂMERA CAÍDA - INVESTIGANDO");
+                    break;
+                }
+            }
+        }
+    }
+
+    // Busca ativa: se o guarda estiver investigando perto de arbustos, ele entra neles para revistar
+    checkBushesDuringInvestigation() {
+        if (this.state !== 'INVESTIGATING') return;
+        
+        let nearestBush = null;
+        let minBushDist = 130;
+        for (let bush of bushes) {
+            let dx = bush.x - this.targetX;
+            let dy = bush.y - this.targetY;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < minBushDist) {
+                minBushDist = dist;
+                nearestBush = bush;
+            }
+        }
+        
+        if (nearestBush && Math.random() < 0.015) { 
+            this.targetX = nearestBush.x;
+            this.targetY = nearestBush.y;
+            createAlertParticle(this.x, this.y, "REVISTANDO COBERTURA!");
+        }
     }
 
     update() {
         let dxMove = 0;
         let dyMove = 0;
+
+        // Verifica eletrônicos caídos na sua região
+        this.checkDisabledElectronics();
 
         if (this.state === 'PATROL') {
             let target = this.patrolPoints[this.currentPointIdx];
@@ -1801,39 +1918,56 @@ class Guard {
             if (dist < 12) {
                 this.currentPointIdx = (this.currentPointIdx + 1) % this.patrolPoints.length;
             } else {
-                this.angle = Math.atan2(dy, dx);
-                dxMove = Math.cos(this.angle) * this.speed;
-                dyMove = Math.sin(this.angle) * this.speed;
+                let steering = this.getSteeringForce(this.targetX, this.targetY);
+                dxMove = steering.x * this.speed;
+                dyMove = steering.y * this.speed;
+                
+                // Varredura de lanterna dinâmica de sentinela
+                this.sentrySweepTimer += 0.04;
+                let sweep = Math.sin(this.sentrySweepTimer) * 0.42;
+                this.angle = Math.atan2(dy, dx) + sweep;
             }
         } 
         else if (this.state === 'INVESTIGATING') {
+            this.checkBushesDuringInvestigation();
+
             let dx = this.targetX - this.x;
             let dy = this.targetY - this.y;
             let dist = Math.sqrt(dx*dx + dy*dy);
 
-            if (dist < 12) {
+            if (dist < 15) {
                 this.investigateTimer--;
-                this.angle += 0.04; 
+                this.angle += 0.055; // Gira procurando o agente
                 if (this.investigateTimer <= 0) {
                     this.state = 'PATROL'; this.speed = this.baseSpeed;
                 }
             } else {
+                let steering = this.getSteeringForce(this.targetX, this.targetY);
                 this.angle = Math.atan2(dy, dx);
-                dxMove = Math.cos(this.angle) * (this.speed * 1.15);
-                dyMove = Math.sin(this.angle) * (this.speed * 1.15);
+                dxMove = steering.x * (this.speed * 1.15);
+                dyMove = steering.y * (this.speed * 1.15);
             }
         } 
         else if (this.state === 'CHASING') {
             this.targetX = player.x; this.targetY = player.y;
             let dx = this.targetX - this.x;
             let dy = this.targetY - this.y;
+            
+            let steering = this.getSteeringForce(this.targetX, this.targetY);
             this.angle = Math.atan2(dy, dx);
-            dxMove = Math.cos(this.angle) * (this.speed * 1.4);
-            dyMove = Math.sin(this.angle) * (this.speed * 1.4);
+            dxMove = steering.x * (this.speed * 1.45);
+            dyMove = steering.y * (this.speed * 1.45);
+
+            // Alerta via rádio em tempo real para cercar o alvo
+            if (Math.random() < 0.02) {
+                this.radioAlertNearbyGuards(500); 
+            }
 
             if (player.inBush && !player.flashlightOn) {
-                this.state = 'INVESTIGATING'; this.targetX = player.x; this.targetY = player.y;
-                this.investigateTimer = 150;
+                this.state = 'INVESTIGATING'; 
+                this.targetX = player.x; 
+                this.targetY = player.y;
+                this.investigateTimer = 180;
             }
         }
 
@@ -1850,7 +1984,15 @@ class Guard {
         let dy = player.y - this.y;
         let dist = Math.sqrt(dx*dx + dy*dy);
 
-        if (dist > this.viewDistance) {
+        // Adapta cone de visão do inimigo de acordo com o estado de busca
+        let currentViewDist = this.viewDistance;
+        let currentViewAngle = this.viewAngle;
+        if (this.state === 'CHASING') {
+            currentViewDist = this.viewDistance * 1.25;
+            currentViewAngle = this.viewAngle * 1.2;
+        }
+
+        if (dist > currentViewDist) {
             if (this.alertTimer > 0) this.alertTimer -= 0.5;
             return;
         }
@@ -1864,7 +2006,7 @@ class Guard {
         let diffAngle = Math.abs(angleToPlayer - this.angle);
         if (diffAngle > Math.PI) diffAngle = Math.PI * 2 - diffAngle;
 
-        if (diffAngle < this.viewAngle) {
+        if (diffAngle < currentViewAngle) {
             let blocked = false;
             for (let wall of walls) {
                 if (lineIntersectsRect(this.x, this.y, player.x, player.y, wall)) {
@@ -1884,6 +2026,7 @@ class Guard {
                         globalAlertLevel = Math.max(globalAlertLevel, 55);
                         triggerScreenShake(18, 3.5);
                         createAlertParticle(this.x, this.y, "ALVO ENCONTRADO!");
+                        this.radioAlertNearbyGuards(600); 
                     }
                 }
                 return;
@@ -2314,6 +2457,7 @@ function updateSpecialItemUI() {
     }
 }
 
+const keys = {};
 window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (["w","s","a","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) {
@@ -2409,7 +2553,6 @@ function updateGame() {
         player.adrenalineTimer--;
     }
 
-    // Cobertura visual da fumaça
     player.inSmoke = false;
     activeSmokeClouds.forEach(sm => {
         sm.life--;
@@ -2533,19 +2676,14 @@ function updateGame() {
         }
     }
 
-    // Sincroniza dados via rádio/MQTT
     syncPlayerPosition();
 
-    // INTERPOLAÇÃO DE OUTROS PLAYERS CO-OP (60 FPS BUTTERY SMOOTH)
-    // Isso remove totalmente o lag e o travamento visual de peer-to-peer!
     const now = Date.now();
     Object.values(playersInLobby).forEach(p => {
         if (now - p.lastUpdate < 6000) {
-            // Suavização das posições cartesianas (Lerp)
             p.x += (p.targetX - p.x) * 0.15;
             p.y += (p.targetY - p.y) * 0.15;
             
-            // Suavização do ângulo de rotação (ajuste de ciclo trigonométrico)
             let angleDiff = p.targetAngle - p.angle;
             while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
             while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -2563,7 +2701,7 @@ function updateGame() {
 
         let dx = player.x - g.x; let dy = player.y - g.y;
         if (Math.sqrt(dx*dx + dy*dy) < player.radius + g.radius) {
-            triggerGameOver("Interceptado pela patrulha especial da ilha.");
+            triggerGameOver("Interceptado pela patrulha tática de Little St. James.");
         }
     });
 
@@ -2589,7 +2727,7 @@ function updateGame() {
     
     const vignetteEff = document.getElementById('vignette-effect');
     if (absoluteAlertLevel > 50) {
-        alertStatus.textContent = "DEFESA COSTEIRA ALERTA";
+        alertStatus.textContent = "DEFESA COSTEIRA EM ALERTA";
         alertStatus.className = "text-xs text-red-500 font-extrabold animate-pulse";
         if (vignetteEff) vignetteEff.className = "absolute inset-0 pointer-events-none alert-pulse-bg transition-all duration-300";
     } else {
@@ -2606,6 +2744,7 @@ function updateGame() {
                 x: s.targetX, y: s.targetY, radius: 1, maxRadius: 180, timer: 0
             });
 
+            // Reação refinada de ruído nos guardas
             guards.forEach(g => {
                 let gdx = g.x - s.targetX;
                 let gdy = g.y - s.targetY;
@@ -2616,7 +2755,7 @@ function updateGame() {
                     g.targetY = s.targetY + (Math.random() - 0.5) * 15;
                     g.investigateTimer = 150;
                     g.speed = g.baseSpeed * 1.25;
-                    createAlertParticle(g.x, g.y, "BARULHO DETECTADO");
+                    createAlertParticle(g.x, g.y, "RUÍDO SUSPEITO DETECTADO!");
                 }
             });
             flyingStones.splice(i, 1);
@@ -2716,7 +2855,6 @@ function drawGame() {
     items.forEach(item => item.draw());
     walls.forEach(w => w.draw());
 
-    // Desenha outros jogadores com suas coordenadas interpoladas (fluidez excepcional)
     const now = Date.now();
     Object.values(playersInLobby).forEach(p => {
         if (now - p.lastUpdate < 6000) {
@@ -2837,7 +2975,7 @@ function drawGame() {
 
     ctx.restore(); 
 
-    // Máscaras de Iluminação Dinâmicas
+    // COMPOSIÇÃO DE ILUMINAÇÃO DINÂMICA COMPLEXA
     if (!lightningActive) {
         offscreenCtx.fillStyle = 'rgba(2, 2, 4, 0.88)';
         offscreenCtx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2863,7 +3001,6 @@ function drawGame() {
             offscreenCtx.fill();
         }
 
-        // Iluminação compartilhada das lanternas dos aliados (totalmente fluida via interpolação de posições)
         Object.values(playersInLobby).forEach(p => {
             if (p.flashlightOn && (now - p.lastUpdate < 6000)) {
                 let relPX = p.x - camera.x;
@@ -2885,19 +3022,24 @@ function drawGame() {
             }
         });
 
+        // Luz dos cones visuais das IAs adaptada para varredura dinâmica
         guards.forEach(g => {
             let relX = g.x - camera.x;
             let relY = g.y - camera.y;
             if (relX < -150 || relX > canvas.width + 150 || relY < -150 || relY > canvas.height + 150) return;
 
-            let grad = offscreenCtx.createRadialGradient(relX, relY, 8, relX, relY, g.viewDistance);
+            // Altera alcance de lanterna se estiver caçando
+            let viewDist = g.state === 'CHASING' ? g.viewDistance * 1.25 : g.viewDistance;
+            let viewAngle = g.state === 'CHASING' ? g.viewAngle * 1.2 : g.viewAngle;
+
+            let grad = offscreenCtx.createRadialGradient(relX, relY, 8, relX, relY, viewDist);
             grad.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
             grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
             offscreenCtx.fillStyle = grad;
             offscreenCtx.beginPath();
             offscreenCtx.moveTo(relX, relY);
-            offscreenCtx.arc(relX, relY, g.viewDistance, g.angle - g.viewAngle, g.angle + g.viewAngle);
+            offscreenCtx.arc(relX, relY, viewDist, g.angle - viewAngle, g.angle + viewAngle);
             offscreenCtx.closePath();
             offscreenCtx.fill();
         });
@@ -2942,9 +3084,12 @@ function drawGame() {
     ctx.translate(-camera.x, -camera.y);
 
     guards.forEach(g => {
-        let grad = ctx.createRadialGradient(g.x, g.y, 8, g.x, g.y, g.viewDistance);
+        let viewDist = g.state === 'CHASING' ? g.viewDistance * 1.25 : g.viewDistance;
+        let viewAngle = g.state === 'CHASING' ? g.viewAngle * 1.2 : g.viewAngle;
+
+        let grad = ctx.createRadialGradient(g.x, g.y, 8, g.x, g.y, viewDist);
         if (g.state === 'CHASING') {
-            grad.addColorStop(0, 'rgba(239, 68, 68, 0.24)');
+            grad.addColorStop(0, 'rgba(239, 68, 68, 0.28)');
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         } else {
             grad.addColorStop(0, 'rgba(251, 146, 60, 0.12)');
@@ -2953,7 +3098,7 @@ function drawGame() {
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.moveTo(g.x, g.y);
-        ctx.arc(g.x, g.y, g.viewDistance, g.angle - g.viewAngle, g.angle + g.viewAngle);
+        ctx.arc(g.x, g.y, viewDist, g.angle - viewAngle, g.angle + viewAngle);
         ctx.closePath();
         ctx.fill();
     });
