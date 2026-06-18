@@ -1,0 +1,2590 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Fuga de Little St. James - Ultimate Co-Op Stealth</title>
+    <!-- Tailwind CSS para design ágil e responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts para tipografia clássica militar/retro -->
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Ícones FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Biblioteca MQTT para Multiplayer Instantâneo sem chaves externas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #010102;
+            overflow: hidden;
+            user-select: none;
+            touch-action: none;
+            -webkit-user-select: none;
+        }
+        .retro-font {
+            font-family: 'Courier Prime', monospace;
+        }
+        .scanlines {
+            position: relative;
+            overflow: hidden;
+        }
+        .scanlines::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 255, 0, 0.03));
+            z-index: 10;
+            background-size: 100% 3px, 5px 100%;
+            pointer-events: none;
+        }
+        .vignette {
+            box-shadow: inset 0 0 160px rgba(0,0,0,0.95);
+        }
+        * {
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #09090b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex items-center justify-center text-gray-200">
+
+<div id="game-container" class="relative w-full h-full max-w-6xl max-h-screen bg-black md:rounded-2xl border border-zinc-800/80 shadow-2xl overflow-hidden flex flex-col md:flex-row">
+    
+    <!-- PAINEL DE STATUS ESQUERDO (Desktop) -->
+    <div id="sidebar" class="hidden md:flex w-80 bg-zinc-950 border-r border-zinc-900 p-5 flex-col justify-between z-20">
+        <div>
+            <div class="border-b border-zinc-900 pb-4 mb-4">
+                <div class="flex items-center gap-2 text-red-500 font-bold tracking-widest text-[10px] uppercase retro-font">
+                    <span class="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+                    OPERAÇÃO: ESCAPE CO-OP
+                </div>
+                <h1 class="text-xl font-black mt-1 text-zinc-100 tracking-tight">ST. JAMES <span class="text-red-600">ISLAND</span></h1>
+                <div class="text-[10px] text-zinc-500 mt-1 uppercase" id="network-status">Iniciando rádio militar...</div>
+                <div class="text-[11px] text-amber-500 mt-1.5 uppercase font-bold bg-amber-950/20 border border-amber-900/30 px-2 py-1 rounded hidden" id="room-indicator-box">
+                    <i class="fa-solid fa-satellite-dish mr-1"></i> <span id="room-indicator">Canal Ativo</span>
+                </div>
+            </div>
+
+            <!-- Diretrizes do Jogador -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Suas Diretrizes</span>
+                    <span class="text-[10px] text-amber-500 font-mono animate-pulse" id="player-codename">AGENTE</span>
+                </h3>
+                <ul id="objective-list" class="space-y-2.5 text-xs retro-font">
+                    <li id="obj-primary" class="flex items-start gap-2 text-zinc-400">
+                        <i class="fa-regular fa-square mt-0.5 text-zinc-600"></i>
+                        <span id="obj-primary-desc">Carregando missão secreta...</span>
+                    </li>
+                    <li id="obj-evidence" class="flex items-start gap-2 text-zinc-400">
+                        <i class="fa-regular fa-square mt-0.5 text-zinc-600"></i>
+                        <span>Extrair Arquivos de Prova <span class="text-amber-500 font-bold" id="evidence-count">0/3</span></span>
+                    </li>
+                    <li id="obj-escape" class="flex items-start gap-2 opacity-40">
+                        <i class="fa-regular fa-square mt-0.5 text-zinc-700"></i>
+                        <span>Escapar no Cais Sul via Iate</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-zinc-900">
+                <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Agentes no Canal (<span id="player-count">1</span>)</h3>
+                <div id="players-lobby-list" class="space-y-1.5 text-xs max-h-48 overflow-y-auto pr-1"></div>
+            </div>
+        </div>
+
+        <!-- Barra de Estado Física do Jogador -->
+        <div class="pt-4 border-t border-zinc-900 space-y-3">
+            <div class="flex justify-between items-center text-xs">
+                <span class="text-zinc-500 uppercase font-bold">Estado</span>
+                <span id="player-status" class="text-green-500 font-bold animate-pulse">Furtivo</span>
+            </div>
+            <div>
+                <div class="flex justify-between text-[9px] text-zinc-500 mb-1">
+                    <span>NÍVEL DE RUÍDO</span>
+                    <span id="noise-text" class="text-zinc-400">SILENCIOSO</span>
+                </div>
+                <div class="w-full h-1 bg-zinc-900 rounded-full overflow-hidden">
+                    <div id="noise-bar" class="w-0 h-full bg-blue-500 transition-all duration-100"></div>
+                </div>
+            </div>
+            <div class="flex justify-between items-center text-xs text-zinc-400">
+                <span>Distrações (Pedras):</span>
+                <span id="rock-inventory" class="text-amber-500 font-bold"><i class="fa-solid fa-circle mr-1 text-[8px]"></i> 3 / 3</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ÁREA CENTRAL DO CANVAS E INTERFACES -->
+    <div class="flex-1 relative bg-zinc-950 flex flex-col items-center justify-center overflow-hidden">
+        
+        <!-- Canvas Principal -->
+        <canvas id="gameCanvas" class="w-full h-full block bg-zinc-950 scanlines"></canvas>
+        <div class="absolute inset-0 pointer-events-none vignette"></div>
+
+        <!-- Notificação de Sistema Customizada -->
+        <div id="sys-notification" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/95 border border-zinc-800 px-4 py-2.5 rounded-xl text-xs text-zinc-200 retro-font pointer-events-none opacity-0 transition-opacity duration-300 z-50 flex items-center gap-2">
+            <i class="fa-solid fa-circle-info text-blue-400" id="notification-icon"></i>
+            <span id="notification-text">Notificação do Sistema</span>
+        </div>
+
+        <!-- HUD Superior de Alerta -->
+        <div class="absolute top-3 left-3 right-3 bg-zinc-950/90 border border-zinc-900 p-2.5 rounded-lg flex items-center justify-between pointer-events-none backdrop-blur z-10">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500 animate-pulse text-sm" id="alarm-icon"></i>
+                <div>
+                    <div class="text-[8px] text-zinc-500 font-bold uppercase">ALERTA GERAL DA ILHA</div>
+                    <div class="text-xs text-zinc-200 font-bold tracking-tight" id="alarm-status">PATRULHA PADRÃO</div>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-[10px] text-zinc-400 retro-font id-indicator-mobile bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800 text-amber-500 font-bold hidden">Lobby</span>
+                <span class="text-[10px] text-zinc-400 retro-font hidden sm:inline" id="sp-objective-indicator"></span>
+                <div class="w-24 sm:w-32 h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+                    <div id="global-alert-bar" class="w-0 h-full bg-red-600 transition-all duration-200"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTROLES ADAPTADOS MOBILE -->
+        <div id="mobile-hud" class="absolute inset-0 pointer-events-none hidden z-20 flex flex-col justify-between p-4">
+            <div class="flex justify-between mt-14">
+                <div class="bg-black/95 px-3 py-1.5 rounded-lg border border-zinc-800/80 text-[10px] retro-font text-amber-500">
+                    Provas: <span id="mob-evidence-count">0/3</span> | <span id="mob-codename">Agente</span>
+                </div>
+                <div class="bg-black/95 px-3 py-1.5 rounded-lg border border-zinc-800/80 text-[10px] retro-font text-green-500" id="mob-status">
+                    Furtivo
+                </div>
+            </div>
+
+            <div class="flex justify-between items-end w-full pb-6 px-2">
+                <div class="pointer-events-auto relative w-28 h-28 bg-zinc-950/80 border-2 border-zinc-800 rounded-full flex items-center justify-center shadow-2xl" id="joystick-boundary">
+                    <div class="absolute w-12 h-12 bg-zinc-100 rounded-full shadow-lg border-2 border-zinc-400 opacity-90 cursor-pointer active:scale-90 transition-transform duration-75" id="joystick-stick" style="transform: translate(0px, 0px);"></div>
+                </div>
+
+                <div class="flex flex-col gap-4 pointer-events-auto">
+                    <button id="btn-throw-stone" class="w-14 h-14 bg-amber-600/90 hover:bg-amber-600 text-white rounded-full flex flex-col items-center justify-center shadow-lg border border-amber-500/50 active:scale-90 transition-all">
+                        <i class="fa-solid fa-bullseye text-lg"></i>
+                        <span class="text-[7px] font-bold uppercase mt-0.5">Mirar</span>
+                    </button>
+                    <button id="btn-toggle-flashlight" class="w-14 h-14 bg-zinc-850/95 hover:bg-zinc-800 text-zinc-100 rounded-full flex flex-col items-center justify-center shadow-lg border border-zinc-700/50 active:scale-90 transition-all">
+                        <i class="fa-solid fa-lightbulb text-lg"></i>
+                        <span class="text-[7px] font-bold uppercase mt-0.5">Luz</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TELA DE CONFIGURAÇÃO DE ENTRADA -->
+        <div id="device-screen" class="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center p-6 z-40 transition-all duration-300">
+            <div class="text-center space-y-6 max-w-lg">
+                <div class="inline-flex items-center gap-2 px-3 py-1 bg-red-950/40 border border-red-900/30 rounded-full text-red-500 font-bold text-xs uppercase tracking-widest retro-font">
+                    <i class="fa-solid fa-gamepad animate-pulse"></i> Dispositivo de Entrada
+                </div>
+                <h2 class="text-3xl font-black text-white uppercase tracking-tight leading-none">Selecione seu Hardware</h2>
+                <p class="text-xs sm:text-sm text-zinc-400 retro-font">
+                    Adaptamos as mecânicas, o joystick virtual e a aceleração de jogo de acordo com o seu dispositivo.
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                    <button id="choose-pc" class="p-5 sm:p-6 bg-zinc-900 hover:bg-zinc-850 border-2 border-zinc-800 hover:border-red-600/50 rounded-xl text-left transition-all flex flex-col justify-between gap-4">
+                        <div class="w-10 h-10 bg-red-950/50 border border-red-500/30 rounded-lg flex items-center justify-center text-red-500 text-lg">
+                            <i class="fa-solid fa-desktop"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-zinc-100 text-sm sm:text-base">Computador (PC)</h4>
+                            <p class="text-[11px] text-zinc-500 mt-1">Movimento em WASD ou Setas. Use o clique do mouse para mirar e arremessar pedras de distração.</p>
+                        </div>
+                    </button>
+
+                    <button id="choose-mobile" class="p-5 sm:p-6 bg-zinc-900 hover:bg-zinc-850 border-2 border-zinc-800 hover:border-blue-600/50 rounded-xl text-left transition-all flex flex-col justify-between gap-4">
+                        <div class="w-10 h-10 bg-blue-950/50 border border-blue-500/30 rounded-lg flex items-center justify-center text-blue-400 text-lg">
+                            <i class="fa-solid fa-mobile-screen-button"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-zinc-100 text-sm sm:text-base">Celular / Tablet</h4>
+                            <p class="text-[11px] text-zinc-500 mt-1">Habilita o joystick analógico dinâmico (esquerdo) e botões de ação ergonômicos (direito).</p>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TELA DE SAGUÃO DE SALAS (ROOM LOBBY) -->
+        <div id="room-screen" class="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center p-6 z-30 hidden transition-all duration-300 overflow-y-auto">
+            <div class="w-full max-w-2xl space-y-5 my-auto">
+                <div class="text-center space-y-2">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 bg-red-950/40 border border-red-900/30 rounded-full text-red-500 font-bold text-[11px] uppercase tracking-widest retro-font">
+                        <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> CONEXÃO DE REDE CO-OP
+                    </div>
+                    <h2 class="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Saguão de Operações</h2>
+                    <p class="text-xs text-zinc-400 retro-font">Configure sua identidade e selecione um canal de infiltração compartilhado.</p>
+                </div>
+
+                <!-- Configurar Identidade -->
+                <div class="bg-zinc-900/50 border border-zinc-850 p-4 rounded-xl space-y-3 shadow-lg">
+                    <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-user-secret text-red-500"></i> Identidade do Agente
+                    </h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] text-zinc-500 uppercase font-bold mb-1">Codinome</label>
+                            <input id="input-codename" type="text" maxlength="14" class="w-full bg-zinc-950 border border-zinc-800 focus:border-red-600 rounded px-3 py-2 text-xs font-mono text-zinc-100 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-zinc-500 uppercase font-bold mb-1">Cor de Radar</label>
+                            <div class="flex gap-2.5 items-center h-9">
+                                <button class="color-dot w-6 h-6 rounded-full border-2 border-transparent transition-all" data-color="#3b82f6" style="background-color: #3b82f6;"></button>
+                                <button class="color-dot w-6 h-6 rounded-full border-2 border-transparent transition-all" data-color="#ef4444" style="background-color: #ef4444;"></button>
+                                <button class="color-dot w-6 h-6 rounded-full border-2 border-transparent transition-all" data-color="#10b981" style="background-color: #10b981;"></button>
+                                <button class="color-dot w-6 h-6 rounded-full border-2 border-transparent transition-all" data-color="#a855f7" style="background-color: #a855f7;"></button>
+                                <button class="color-dot w-6 h-6 rounded-full border-2 border-transparent transition-all" data-color="#f59e0b" style="background-color: #f59e0b;"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista de Salas / Sincronizar -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Canais Públicos -->
+                    <div class="bg-zinc-900/50 border border-zinc-850 p-4 rounded-xl flex flex-col justify-between space-y-3 shadow-lg">
+                        <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-tower-broadcast text-zinc-500"></i> Canais de Rádio Públicos
+                        </h3>
+                        <div id="rooms-list-container" class="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                            <div class="text-center text-[10px] text-zinc-500 py-3 retro-font">Buscando transmissões...</div>
+                        </div>
+                    </div>
+
+                    <!-- Código Privado com Gerador de Token -->
+                    <div class="bg-zinc-900/50 border border-zinc-850 p-4 rounded-xl flex flex-col justify-between space-y-3 shadow-lg">
+                        <div class="space-y-2.5">
+                            <h3 class="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-lock text-red-500"></i> Operações Secretas (Privadas)
+                            </h3>
+                            
+                            <!-- Botão Gerador de Código -->
+                            <button id="btn-generate-code" class="w-full py-2 bg-zinc-800 hover:bg-zinc-750 text-zinc-100 font-bold rounded text-[10px] uppercase tracking-wider transition-all border border-zinc-750 flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-key text-amber-500"></i> Gerar Novo Código de Infiltração
+                            </button>
+
+                            <!-- Painel de exibição de código gerado -->
+                            <div id="generated-code-box" class="hidden p-2.5 bg-black/60 border border-amber-950/50 rounded flex items-center justify-between">
+                                <div class="text-[10px] font-bold text-amber-500 font-mono tracking-wider">
+                                    CÓDIGO: <span id="lbl-generated-code" class="text-zinc-100 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">NENHUM</span>
+                                </div>
+                                <button id="btn-copy-code" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded text-[9px] uppercase tracking-wider transition-all flex items-center gap-1">
+                                    <i class="fa-solid fa-copy"></i> Copiar
+                                </button>
+                            </div>
+
+                            <div class="pt-1.5">
+                                <label class="block text-[9px] text-zinc-500 uppercase font-bold mb-1">Entrar com Código Secreto</label>
+                                <input id="input-custom-room" type="text" placeholder="Cole ou digite o código aqui" maxlength="25" class="w-full bg-zinc-950 border border-zinc-800 focus:border-red-600 rounded px-3 py-2 text-xs font-mono text-zinc-100 outline-none uppercase placeholder-zinc-800">
+                            </div>
+                        </div>
+
+                        <button id="btn-create-room" class="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded text-xs uppercase tracking-wider transition-all shadow-md">
+                            <i class="fa-solid fa-plug mr-1"></i> Conectar Código
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TELA INICIAL / INTRO -->
+        <div id="start-screen" class="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center p-6 z-30 hidden transition-all duration-500">
+            <div class="max-w-xl text-center z-10 space-y-5">
+                <div class="inline-flex items-center gap-2 px-3 py-1 bg-red-950/50 border border-red-900/40 rounded-full text-red-500 font-bold text-xs uppercase tracking-widest retro-font">
+                    <i class="fa-solid fa-eye-slash animate-pulse"></i> Infiltração Silenciosa
+                </div>
+                <h2 class="text-3xl md:text-5xl font-black tracking-tight text-white leading-none">
+                    FUGA DE <br><span class="text-red-600">LITTLE ST. JAMES</span>
+                </h2>
+                <p class="text-xs md:text-sm text-zinc-400 leading-relaxed retro-font">
+                    Infiltre-se sob o véu de uma severa tempestade tropical. Hackeie os servidores e recolha evidências criptografadas essenciais para expor o esquema global. Desvie dos agentes e câmeras térmicas.
+                </p>
+
+                <div class="p-4 bg-zinc-900/60 border border-zinc-800/80 rounded-xl text-left space-y-2">
+                    <h4 class="text-xs font-bold text-zinc-300 uppercase tracking-widest flex items-center gap-1.5">
+                        <i class="fa-solid fa-circle-nodes text-red-500"></i> Cooperação Real Multijogador:
+                    </h4>
+                    <p class="text-[11px] text-zinc-400 leading-normal">
+                        • <b>Mesmo Canal Ativo:</b> Todos os agentes na mesma sala jogam juntos simultaneamente no mesmo mapa!<br>
+                        • <b>Lanternas Táticas:</b> A iluminação de outros jogadores ajuda a clarear as áreas escuras para todos.<br>
+                        • <b>Cuidado com Ruídos:</b> Arremesse pedras para desviar patrulhas e ajudar seus aliados em perigo.
+                    </p>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button id="start-btn" class="px-8 py-3.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-lg active:scale-95 transition-all text-xs uppercase tracking-wider">
+                        <i class="fa-solid fa-play mr-1.5"></i> Iniciar Missão
+                    </button>
+                    <button id="audio-toggle-btn" class="px-6 py-3.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-bold rounded-lg border border-zinc-800 transition-all text-xs flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-volume-high text-amber-500" id="audio-icon-btn"></i> Áudio Ativo
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TELA DE GAME OVER -->
+        <div id="gameover-screen" class="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center p-6 z-30 hidden transition-all duration-300">
+            <div class="text-center space-y-5 max-w-md">
+                <div class="w-16 h-16 bg-red-950/50 border border-red-500/30 rounded-full flex items-center justify-center mx-auto text-red-500 text-2xl animate-bounce">
+                    <i class="fa-solid fa-skull"></i>
+                </div>
+                <h2 class="text-2xl font-black text-white uppercase tracking-tight">Agente Neutralizado</h2>
+                <p class="text-xs text-zinc-400 retro-font">
+                    Você foi detectado e preso pelas forças táticas privadas da ilha.
+                </p>
+                <div class="p-4 bg-zinc-900/50 border border-zinc-850 rounded-lg text-left text-xs space-y-1 text-zinc-500">
+                    <div>Motivo: <span class="text-red-400 font-semibold" id="fail-reason">Falta de cobertura física</span></div>
+                    <div>Provas coletadas: <span class="text-amber-500 font-bold" id="fail-evidence">0 / 3</span></div>
+                </div>
+                <button id="restart-btn" class="px-8 py-3 bg-zinc-100 hover:bg-white text-zinc-950 font-bold rounded-lg transition-all text-xs uppercase tracking-wider w-full">
+                    <i class="fa-solid fa-rotate-left mr-1.5"></i> Nova Infiltração
+                </button>
+            </div>
+        </div>
+
+        <!-- TELA DE VITÓRIA -->
+        <div id="victory-screen" class="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center p-6 z-30 hidden transition-all duration-300">
+            <div class="text-center space-y-5 max-w-md">
+                <div class="w-16 h-16 bg-green-950/50 border border-green-500/30 rounded-full flex items-center justify-center mx-auto text-green-400 text-3xl animate-pulse">
+                    <i class="fa-solid fa-ship"></i>
+                </div>
+                <h2 class="text-2xl md:text-3xl font-black text-green-500 uppercase tracking-tight">Fuga Bem-Sucedida</h2>
+                <p class="text-xs text-zinc-300 leading-relaxed retro-font">
+                    Você alcançou o cais de escape com todos os dados protegidos.
+                </p>
+                <div class="p-5 bg-zinc-900/50 border border-zinc-800 rounded-xl space-y-2 text-left text-xs">
+                    <div class="flex justify-between"><span class="text-zinc-500 uppercase">Tempo Operacional:</span> <span class="text-white font-bold" id="victory-time">00:00</span></div>
+                    <div class="flex justify-between"><span class="text-zinc-500 uppercase">Arquivos Roubados:</span> <span class="text-amber-500 font-bold">3 / 3</span></div>
+                </div>
+                <button id="play-again-btn" class="px-8 py-3.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg transition-all text-xs uppercase tracking-wider w-full shadow-lg">
+                    <i class="fa-solid fa-circle-play mr-1.5"></i> Reiniciar Missão
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script type="module">
+class SoundController {
+    constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.synthInterval = null;
+    }
+
+    init() {
+        if (!this.ctx) {
+            try {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.warn("Navegador bloqueou Web Audio API:", e);
+            }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    playTick() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        let osc = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.frequency.setValueAtTime(500, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.1);
+    }
+
+    playAlertRise() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        let osc = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(300, this.ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
+    }
+
+    playStoneDrop() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        let osc = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(250, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, this.ctx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0.06, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.4);
+    }
+
+    playCollect() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        let osc1 = this.ctx.createOscillator();
+        let osc2 = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+        
+        osc1.frequency.setValueAtTime(350, this.ctx.currentTime);
+        osc1.frequency.setValueAtTime(520, this.ctx.currentTime + 0.1);
+        osc2.frequency.setValueAtTime(650, this.ctx.currentTime + 0.2);
+        
+        gain.gain.setValueAtTime(0.06, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.35);
+        
+        osc1.start();
+        osc2.start();
+        osc1.stop(this.ctx.currentTime + 0.35);
+        osc2.stop(this.ctx.currentTime + 0.35);
+    }
+
+    playThunder() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        let osc = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(50, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(15, this.ctx.currentTime + 1.5);
+        gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.5);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 1.5);
+    }
+
+    startAmbience() {
+        if (!this.enabled) return;
+        this.init();
+        this.stopAmbience();
+        let beat = 0;
+        this.synthInterval = setInterval(() => {
+            if (!this.enabled) return;
+            this.init();
+            if (!this.ctx) return;
+            let osc = this.ctx.createOscillator();
+            let gain = this.ctx.createGain();
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.type = 'sawtooth';
+            
+            const scale = [45, 45, 48, 45, 52, 48, 42, 45];
+            const freq = scale[beat % scale.length];
+            
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(0.015, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.75);
+            
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.8);
+            beat++;
+        }, 600);
+    }
+
+    stopAmbience() {
+        if (this.synthInterval) {
+            clearInterval(this.synthInterval);
+            this.synthInterval = null;
+        }
+    }
+}
+
+const sound = new SoundController();
+
+let mqttClient = null;
+let activeRoomId = "";
+let myUid = "agent_" + Math.random().toString(36).substring(2, 10);
+let myCodename = "AGENTE_" + Math.floor(100 + Math.random() * 900);
+let myColor = '#3b82f6';
+let playersInLobby = {};
+let isOnline = false;
+let roomListRegistry = {};
+
+// Função segura para copiar texto no preview (iFrame)
+function copyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed"; 
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+    } catch (err) {
+        console.warn('Erro ao copiar código:', err);
+    } finally {
+        document.body.removeChild(textArea);
+    }
+    return success;
+}
+
+// Mostra notificações sem quebrar com alerts tradicionais
+function showSystemNotification(text, iconClass = "fa-solid fa-circle-info", iconColorClass = "text-blue-400") {
+    const box = document.getElementById('sys-notification');
+    const txt = document.getElementById('notification-text');
+    const icon = document.getElementById('notification-icon');
+    if (!box || !txt) return;
+
+    txt.textContent = text;
+    icon.className = iconClass + " " + iconColorClass;
+    box.style.opacity = "1";
+    setTimeout(() => {
+        box.style.opacity = "0";
+    }, 4000);
+}
+
+// Inicializa a conexão com o broker MQTT global gratuito (EMQX com fallback para HiveMQ)
+function setupMultiplayer() {
+    const netStatus = document.getElementById('network-status');
+    const inputName = document.getElementById('input-codename');
+    
+    if (inputName) {
+        inputName.value = myCodename;
+    }
+
+    netStatus.textContent = "SINTONIZANDO RÁDIO...";
+    
+    try {
+        // Tentativa de conexão ao Broker MQTT robusto via WSS
+        mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+            clientId: 'stjames_' + myUid,
+            clean: true,
+            connectTimeout: 5000,
+            reconnectPeriod: 2000
+        });
+
+        mqttClient.on('connect', () => {
+            isOnline = true;
+            netStatus.textContent = "CONEXÃO ATIVA - SELECIONE CANAL";
+            netStatus.className = "text-[10px] text-green-500 mt-1 uppercase animate-pulse font-bold";
+            
+            // Ativa visualização da tela de escolha de canais
+            document.getElementById('room-screen').classList.remove('hidden');
+
+            // Inscreve-se na lista global de descoberta de salas
+            mqttClient.subscribe('stjames/coop/rooms/registry/+', (err) => {
+                if (err) console.error("Falha ao escutar registro de salas:", err);
+            });
+        });
+
+        mqttClient.on('message', (topic, message) => {
+            try {
+                const payload = JSON.parse(message.toString());
+                
+                // Trata as mensagens de descoberta de salas ativas
+                if (topic.startsWith('stjames/coop/rooms/registry/')) {
+                    const roomId = topic.replace('stjames/coop/rooms/registry/', '');
+                    roomListRegistry[roomId] = {
+                        id: roomId,
+                        activePlayers: payload.count || 1,
+                        timestamp: Date.now()
+                    };
+                    renderRoomsList();
+                }
+
+                // Trata o tráfego em tempo real dentro da sala ativa
+                if (activeRoomId && topic.startsWith(`stjames/coop/rooms/active/${activeRoomId}/`)) {
+                    const senderId = topic.split('/').pop();
+                    if (senderId !== myUid) {
+                        if (payload.type === 'state') {
+                            playersInLobby[senderId] = {
+                                uid: senderId,
+                                name: payload.name,
+                                color: payload.color,
+                                x: payload.x,
+                                y: payload.y,
+                                angle: payload.angle,
+                                flashlightOn: payload.flashlightOn,
+                                status: payload.status,
+                                alertLevel: payload.alertLevel,
+                                lastUpdate: Date.now()
+                            };
+                            updatePlayersLobbyList();
+                        } else if (payload.type === 'stone') {
+                            flyingStones.push(new FlyingStone(payload.sx, payload.sy, payload.tx, payload.ty));
+                        } else if (payload.type === 'collect') {
+                            const item = items.find(i => i.id === payload.itemId);
+                            if (item && !item.collected) {
+                                item.collected = true;
+                                sound.playCollect();
+                                createAlertParticle(item.x, item.y, `PARCEIRO CO-OP EXTRAIU: ${item.name}`);
+                                if (item.type === 'primary') {
+                                    player.primaryObjectiveCompleted = true;
+                                }
+                                updateObjectivesUI();
+                            }
+                        }
+                    }
+                }
+            } catch(e) {
+                console.warn("Erro ao ler pacote de rádio:", e);
+            }
+        });
+
+        mqttClient.on('error', (err) => {
+            console.warn("Erro no Broker MQTT primário, tentando HiveMQ:", err);
+            // Fallback imediato para broker alternativo
+            try {
+                mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+                    clientId: 'stjames_fb_' + myUid,
+                    clean: true
+                });
+            } catch(e) {
+                runSimulatedMultiplayer();
+            }
+        });
+
+    } catch (e) {
+        console.warn("Sem conexão com rádio real-time, rodando em simulação local:", e);
+        runSimulatedMultiplayer();
+    }
+}
+
+function renderRoomsList() {
+    const container = document.getElementById('rooms-list-container');
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const defaultRooms = ["ALPHA", "BRAVO", "CHARLIE"];
+    
+    // Filtra salas inativas por tempo de expiração
+    const now = Date.now();
+    Object.keys(roomListRegistry).forEach(key => {
+        if (now - roomListRegistry[key].timestamp > 10000) {
+            delete roomListRegistry[key];
+        }
+    });
+
+    defaultRooms.forEach(roomId => {
+        const roomData = roomListRegistry[roomId];
+        const playerCnt = roomData ? roomData.activePlayers : 0;
+        
+        container.innerHTML += `
+            <button onclick="window.joinCoopRoom('${roomId}')" class="w-full p-2.5 bg-zinc-900/85 hover:bg-red-950/40 border border-zinc-800 hover:border-red-600 text-left rounded-lg flex items-center justify-between text-xs transition-all active:scale-95">
+                <span class="font-mono text-zinc-100 font-bold"><i class="fa-solid fa-tower-broadcast mr-1.5 text-zinc-500"></i> CANAL_${roomId}</span>
+                <span class="text-[9px] text-zinc-400 font-mono">AGENTES: <span class="text-amber-500 font-bold">${playerCnt}</span></span>
+            </button>
+        `;
+    });
+
+    // Exibe outras salas criadas de forma dinâmica
+    Object.keys(roomListRegistry).forEach(roomId => {
+        if (!defaultRooms.includes(roomId)) {
+            const roomData = roomListRegistry[roomId];
+            container.innerHTML += `
+                <button onclick="window.joinCoopRoom('${roomId}')" class="w-full p-2.5 bg-zinc-900/85 hover:bg-red-950/40 border border-zinc-850 hover:border-amber-600 text-left rounded-lg flex items-center justify-between text-xs transition-all active:scale-95">
+                    <span class="font-mono text-zinc-100 font-bold"><i class="fa-solid fa-lock mr-1.5 text-amber-500 animate-pulse"></i> ${roomId}</span>
+                    <span class="text-[9px] text-zinc-400 font-mono">AGENTES: <span class="text-amber-500 font-bold">${roomData.activePlayers}</span></span>
+                </button>
+            `;
+        }
+    });
+}
+
+window.joinCoopRoom = function(roomId) {
+    roomId = roomId.toUpperCase().trim().replace(/[^A-Z0-9_-]/g, "");
+    if (!roomId) return;
+    
+    sound.playTick();
+    activeRoomId = roomId;
+
+    const codenameInput = document.getElementById('input-codename');
+    if (codenameInput && codenameInput.value.trim()) {
+        myCodename = codenameInput.value.trim().toUpperCase();
+    }
+
+    // Configura os textos do painel de rádio
+    document.getElementById('player-codename').textContent = myCodename;
+    document.getElementById('player-codename').style.color = myColor;
+    
+    document.getElementById('room-indicator').textContent = activeRoomId;
+    document.getElementById('room-indicator-box').classList.remove('hidden');
+    
+    const mobCodename = document.getElementById('mob-codename');
+    if (mobCodename) mobCodename.textContent = myCodename;
+
+    const mobIndicator = document.querySelector('.id-indicator-mobile');
+    if (mobIndicator) {
+        mobIndicator.textContent = activeRoomId;
+        mobIndicator.classList.remove('hidden');
+    }
+
+    if (isOnline && mqttClient) {
+        // Desinscreve de registros anteriores e se inscreve na sala específica ativa
+        mqttClient.subscribe(`stjames/coop/rooms/active/${activeRoomId}/+`, (err) => {
+            if (err) console.error("Falha ao sintonizar frequência da sala:", err);
+        });
+
+        // Loop de atualização de anúncio da sala ativa
+        setInterval(() => {
+            if (isOnline && activeRoomId) {
+                const count = Object.keys(playersInLobby).length + 1;
+                mqttClient.publish(`stjames/coop/rooms/registry/${activeRoomId}`, JSON.stringify({ count: count }), { qos: 0 });
+            }
+        }, 3000);
+
+        showSystemNotification(`Frequência sintonizada em ${activeRoomId}!`, "fa-solid fa-circle-check", "text-green-400");
+    }
+
+    // Transiciona da tela de salas para a tela de instruções iniciais
+    document.getElementById('room-screen').classList.add('hidden');
+    document.getElementById('start-screen').classList.remove('hidden');
+};
+
+// Publica o arremesso de pedras cooperativo no canal
+function publishStoneAction(sx, sy, tx, ty) {
+    if (!isOnline || !mqttClient || !activeRoomId) return;
+    mqttClient.publish(`stjames/coop/rooms/active/${activeRoomId}/${myUid}`, JSON.stringify({
+        type: 'stone',
+        sx: sx,
+        sy: sy,
+        tx: tx,
+        ty: ty
+    }), { qos: 0 });
+}
+
+// Publica a coleta de provas/itens para o time todo
+function publishCollectAction(itemId) {
+    if (!isOnline || !mqttClient || !activeRoomId) return;
+    mqttClient.publish(`stjames/coop/rooms/active/${activeRoomId}/${myUid}`, JSON.stringify({
+        type: 'collect',
+        itemId: itemId
+    }), { qos: 1 });
+}
+
+function runSimulatedMultiplayer() {
+    isOnline = false;
+    const netStatus = document.getElementById('network-status');
+    netStatus.textContent = "MODO LOCAL (SOZINHO)";
+    netStatus.className = "text-[10px] text-zinc-500 mt-1 uppercase";
+    playersInLobby = {};
+    updatePlayersLobbyList();
+}
+
+function updatePlayersLobbyList() {
+    const listContainer = document.getElementById('players-lobby-list');
+    const countContainer = document.getElementById('player-count');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = "";
+    
+    listContainer.innerHTML += `
+        <div class="flex items-center justify-between py-1.5 border-b border-zinc-900">
+            <span class="font-bold flex items-center gap-1.5" style="color: ${myColor}">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> ${myCodename} (Você)
+            </span>
+            <span class="text-[10px] text-zinc-400 font-mono">${player.inBush ? 'Oculto' : 'Explorando'}</span>
+        </div>
+    `;
+
+    let totalOnline = 1;
+    const now = Date.now();
+    Object.values(playersInLobby).forEach(p => {
+        // Filtra agentes desconectados (sem sinal por mais de 6 segundos)
+        if (now - p.lastUpdate < 6000) {
+            totalOnline++;
+            listContainer.innerHTML += `
+                <div class="flex items-center justify-between py-1.5 border-b border-zinc-900">
+                    <span class="font-semibold flex items-center gap-1.5" style="color: ${p.color}">
+                        <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span> ${p.name}
+                    </span>
+                    <span class="text-[10px] text-zinc-500 font-mono">${p.status || 'Furtivo'}</span>
+                </div>
+            `;
+        } else {
+            delete playersInLobby[p.uid];
+        }
+    });
+
+    countContainer.textContent = totalOnline.toString();
+}
+
+let lastNetworkSync = 0;
+function syncPlayerPosition() {
+    if (!isOnline || !mqttClient || !activeRoomId) return;
+    let now = Date.now();
+    if (now - lastNetworkSync < 100) return; 
+    lastNetworkSync = now;
+    
+    mqttClient.publish(`stjames/coop/rooms/active/${activeRoomId}/${myUid}`, JSON.stringify({
+        type: 'state',
+        name: myCodename,
+        color: myColor,
+        x: player.x,
+        y: player.y,
+        angle: player.angle,
+        flashlightOn: player.flashlightOn,
+        status: player.inBush ? "Oculto" : (player.flashlightOn ? "Lanternas ON" : "Furtivo"),
+        alertLevel: globalAlertLevel
+    }), { qos: 0 });
+}
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let offscreenCanvas = null;
+let offscreenCtx = null;
+
+let patternGrass = null;
+let patternMansion = null;
+let patternLab = null;
+let patternTemple = null;
+
+const WORLD_WIDTH = 2400;
+const WORLD_HEIGHT = 1800;
+
+const camera = { x: 0, y: 0, width: 0, height: 0 };
+let gameState = 'START';
+let inputDevice = 'PC';
+let startTime = 0;
+let finishTime = 0;
+let highestAlert = 0;
+
+const joystick = {
+    active: false,
+    touchId: null,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    maxDistance: 45,
+    vx: 0,
+    vy: 0
+};
+
+const player = {
+    x: 100,
+    y: 1650,
+    vx: 0,
+    vy: 0,
+    radius: 14,
+    speed: 3.5,
+    friction: 0.82,
+    angle: 0,
+    flashlightOn: false,
+    rockCount: 3,
+    inBush: false,
+    noiseLevel: 0,
+    primaryObjectiveCompleted: false
+};
+
+const keys = {};
+let distractions = [];
+let particles = [];
+let items = [];
+let bushes = [];
+let walls = [];
+let guards = [];
+let searchlights = [];
+let securityCameras = [];
+let globalAlertLevel = 0;
+
+let footstepRipples = [];
+
+let aimingMode = false;
+let aimTargetX = 0;
+let aimTargetY = 0;
+let flyingStones = [];
+
+let cutsceneFrame = 0;
+let cutsceneTimeline = 0;
+let cutsceneYachtX = 0;
+let cutsceneYachtY = 0;
+
+let screenShake = { x: 0, y: 0, duration: 0, intensity: 0 };
+let lightningActive = false;
+let lightningTimer = 80;
+
+// Objetivos e posições correspondentes
+const primaryObjectives = [
+    { id: 'server', desc: 'Infiltrar Sala de Servidores Secundários', x: 300, y: 550 },
+    { id: 'temple_altar', desc: 'Decodificar Painel no Templo Azul', x: 1950, y: 950 },
+    { id: 'mansion_safe', desc: 'Recuperar Manifestos no Cofre Principal', x: 1350, y: 350 },
+    { id: 'radar_tracker', desc: 'Instalar Rastreador na Torre de Radar', x: 2100, y: 150 }
+];
+let mySelectedObjective = primaryObjectives[0];
+
+function triggerScreenShake(duration, intensity) {
+    screenShake.duration = duration;
+    screenShake.intensity = intensity;
+}
+
+function initTextures() {
+    let gCanvas = document.createElement('canvas');
+    gCanvas.width = 64; gCanvas.height = 64;
+    let gCtx = gCanvas.getContext('2d');
+    gCtx.fillStyle = '#051208';
+    gCtx.fillRect(0, 0, 64, 64);
+    
+    gCtx.fillStyle = '#081a0c';
+    for (let i = 0; i < 40; i++) {
+        gCtx.fillRect(Math.random() * 64, Math.random() * 64, 1.5, 1.5);
+    }
+    gCtx.strokeStyle = 'rgba(12, 40, 20, 0.4)';
+    gCtx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+        let lx = Math.random() * 50; let ly = Math.random() * 50;
+        gCtx.beginPath();
+        gCtx.moveTo(lx, ly);
+        gCtx.lineTo(lx + 4, ly - 4);
+        gCtx.stroke();
+    }
+    patternGrass = ctx.createPattern(gCanvas, 'repeat');
+
+    let mCanvas = document.createElement('canvas');
+    mCanvas.width = 64; mCanvas.height = 64;
+    let mCtx = mCanvas.getContext('2d');
+    mCtx.fillStyle = '#0d0d12';
+    mCtx.fillRect(0, 0, 64, 64);
+    mCtx.fillStyle = '#14141c';
+    mCtx.fillRect(0, 0, 64, 30);
+    mCtx.fillRect(0, 32, 64, 30);
+    mCtx.strokeStyle = '#050508';
+    mCtx.lineWidth = 2;
+    mCtx.strokeRect(0, 0, 64, 64);
+    patternMansion = ctx.createPattern(mCanvas, 'repeat');
+
+    let lCanvas = document.createElement('canvas');
+    lCanvas.width = 32; lCanvas.height = 32;
+    let lCtx = lCanvas.getContext('2d');
+    lCtx.fillStyle = '#111317';
+    lCtx.fillRect(0, 0, 32, 32);
+    lCtx.strokeStyle = 'rgba(16, 185, 129, 0.08)';
+    lCtx.lineWidth = 1;
+    lCtx.strokeRect(0, 0, 32, 32);
+    lCtx.fillStyle = 'rgba(16, 185, 129, 0.04)';
+    lCtx.fillRect(2, 2, 28, 28);
+    patternLab = ctx.createPattern(lCanvas, 'repeat');
+
+    let tCanvas = document.createElement('canvas');
+    tCanvas.width = 48; tCanvas.height = 48;
+    let tCtx = tCanvas.getContext('2d');
+    tCtx.fillStyle = '#070a14';
+    tCtx.fillRect(0, 0, 48, 48);
+    tCtx.strokeStyle = '#1d4ed8';
+    tCtx.lineWidth = 0.5;
+    tCtx.beginPath();
+    tCtx.moveTo(0, 0); tCtx.lineTo(48, 48);
+    tCtx.moveTo(48, 0); tCtx.lineTo(0, 48);
+    tCtx.stroke();
+    tCtx.strokeRect(0, 0, 48, 48);
+    patternTemple = ctx.createPattern(tCanvas, 'repeat');
+}
+
+function createIslandMap() {
+    items = [];
+    bushes = [];
+    walls = [];
+    guards = [];
+    distractions = [];
+    particles = [];
+    searchlights = [];
+    securityCameras = [];
+    footstepRipples = [];
+    flyingStones = [];
+
+    // Escolhe o objetivo de forma determinística baseada no nome da sala
+    let objIndex = 0;
+    if (activeRoomId) {
+        let sum = 0;
+        for (let i = 0; i < activeRoomId.length; i++) sum += activeRoomId.charCodeAt(i);
+        objIndex = sum % primaryObjectives.length;
+    }
+    mySelectedObjective = primaryObjectives[objIndex];
+
+    const primaryDesc = document.getElementById('obj-primary-desc');
+    const spIndicator = document.getElementById('sp-objective-indicator');
+    if (primaryDesc) primaryDesc.textContent = mySelectedObjective.desc;
+    if (spIndicator) spIndicator.textContent = `OBJETIVO: ${mySelectedObjective.desc}`;
+
+    // Paredes e bordas
+    addWall(0, 0, WORLD_WIDTH, 50, "coast");
+    addWall(0, 0, 50, WORLD_HEIGHT, "coast");
+    addWall(WORLD_WIDTH - 50, 0, 50, WORLD_HEIGHT, "coast");
+    addWall(0, WORLD_HEIGHT - 50, WORLD_WIDTH, 50, "coast");
+
+    // Mansão Central
+    const mX = 900, mY = 300;
+    addWall(mX, mY, 220, 40, "mansion"); 
+    addWall(mX + 340, mY, 260, 40, "mansion"); 
+    addWall(mX, mY, 40, 120, "mansion"); 
+    addWall(mX, mY + 240, 40, 160, "mansion"); 
+    addWall(mX + 560, mY, 40, 400, "mansion"); 
+    addWall(mX, mY + 400, 200, 40, "mansion"); 
+    addWall(mX + 360, mY + 400, 240, 40, "mansion"); 
+    addWall(mX + 280, mY, 40, 140, "mansion_floor"); 
+    addWall(mX + 280, mY + 260, 40, 140, "mansion_floor");
+
+    // Templo Leste
+    const tX = 1800, tY = 800;
+    addWall(tX, tY, 100, 40, "temple");
+    addWall(tX + 180, tY, 120, 40, "temple"); 
+    addWall(tX, tY, 40, 120, "temple");
+    addWall(tX, tY + 220, 40, 115, "temple"); 
+    addWall(tX + 260, tY, 40, 335, "temple");
+    addWall(tX, tY + 300, 80, 40, "temple");
+    addWall(tX + 180, tY + 300, 120, 40, "temple");
+
+    // Laboratório Oeste
+    const lX = 250, lY = 500;
+    addWall(lX, lY, 140, 40, "lab");
+    addWall(lX + 240, lY, 160, 40, "lab"); 
+    addWall(lX, lY, 40, 120, "lab");
+    addWall(lX, lY + 220, 40, 130, "lab"); 
+    addWall(lX + 360, lY, 40, 350, "lab");
+    addWall(lX, lY + 350, 140, 40, "lab");
+    addWall(lX + 240, lY + 350, 160, 40, "lab");
+
+    // Radar Norte
+    addWall(2000, 100, 250, 40, "coast");
+    addWall(2000, 100, 40, 150, "coast");
+
+    const bushPositions = [
+        {x: 150, y: 1400, r: 50}, {x: 230, y: 1300, r: 55}, {x: 180, y: 1050, r: 45},
+        {x: 120, y: 900, r: 45}, {x: 350, y: 1000, r: 60}, {x: 420, y: 1250, r: 50},
+        {x: 820, y: 800, r: 55}, {x: 950, y: 850, r: 55}, {x: 1100, y: 900, r: 60},
+        {x: 1400, y: 850, r: 55}, {x: 1550, y: 800, r: 50}, {x: 1750, y: 1300, r: 50},
+        {x: 1900, y: 1400, r: 60}, {x: 2100, y: 1200, r: 55}, {x: 2150, y: 950, r: 45},
+        {x: 1700, y: 750, r: 50}, {x: 1650, y: 600, r: 55}, {x: 750, y: 400, r: 55},
+        {x: 780, y: 250, r: 50}, {x: 1600, y: 300, r: 55}
+    ];
+    bushPositions.forEach(b => bushes.push(new Bush(b.x, b.y, b.r)));
+
+    // Elementos de Coleta Sincronizada
+    items.push(new Item('evidence-1', 300, 680, 'evidence', 'Arquivos Criptografados I'));
+    items.push(new Item('evidence-2', 1950, 1000, 'evidence', 'Arquivos Criptografados II'));
+    items.push(new Item('evidence-3', 1450, 350, 'evidence', 'Arquivos Criptografados III'));
+    items.push(new Item('primary-target', mySelectedObjective.x, mySelectedObjective.y, 'primary', mySelectedObjective.desc));
+    items.push(new Item('boat-escape', 2250, 1650, 'boat', 'Iate de Escape'));
+
+    // Guardas de Patrulha
+    guards.push(new Guard(400, 1500, [{x: 400, y: 1500}, {x: 800, y: 1500}, {x: 800, y: 1700}], 2.3));
+    guards.push(new Guard(200, 1000, [{x: 200, y: 1000}, {x: 550, y: 1000}, {x: 550, y: 1250}], 2.4));
+    guards.push(new Guard(500, 600, [{x: 500, y: 600}, {x: 500, y: 850}], 2.5));
+    guards.push(new Guard(1050, 200, [{x: 800, y: 200}, {x: 1300, y: 200}], 2.4));
+    guards.push(new Guard(1000, 500, [{x: 1000, y: 500}, {x: 1400, y: 500}], 2.8));
+    guards.push(new Guard(1650, 1000, [{x: 1650, y: 1000}, {x: 2150, y: 1000}], 2.6));
+    guards.push(new Guard(1200, 1100, [{x: 1200, y: 1100}, {x: 1500, y: 1100}, {x: 1500, y: 1300}], 2.7));
+    guards.push(new Guard(2100, 1450, [{x: 2100, y: 1450}, {x: 2300, y: 1450}], 2.8));
+
+    // Holofotes de Torre
+    searchlights.push(new Searchlight(750, 750, 160, 0.005, 180));
+    searchlights.push(new Searchlight(1650, 450, 170, -0.004, 200));
+
+    // Câmeras Rotativas
+    securityCameras.push(new SecurityCamera(900, 430, 0, -Math.PI/3.5, Math.PI/3.5, 0.008));
+    securityCameras.push(new SecurityCamera(1480, 430, Math.PI, Math.PI*3.2/4, Math.PI*4.8/4, 0.006));
+}
+
+class Wall {
+    constructor(x, y, w, h, type) {
+        this.x = x; this.y = y; this.w = w; this.h = h; this.type = type;
+    }
+    draw() {
+        if (this.x + this.w < camera.x - 50 || this.x > camera.x + camera.width + 50 ||
+            this.y + this.h < camera.y - 50 || this.y > camera.y + camera.height + 50) return;
+
+        if (this.type === "mansion") {
+            ctx.fillStyle = '#1e1b18';
+            ctx.strokeStyle = '#c2410c';
+        } else if (this.type === "lab") {
+            ctx.fillStyle = '#111827';
+            ctx.strokeStyle = '#10b981';
+        } else if (this.type === "temple") {
+            ctx.fillStyle = '#0f172a';
+            ctx.strokeStyle = '#2563eb';
+        } else {
+            ctx.fillStyle = '#18181b';
+            ctx.strokeStyle = '#3f3f46';
+        }
+
+        ctx.lineWidth = 2.5;
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+        ctx.strokeRect(this.x, this.y, this.w, this.h);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        ctx.fillRect(this.x + 3, this.y + 3, this.w - 6, this.h - 6);
+    }
+}
+
+function addWall(x, y, w, h, t) { walls.push(new Wall(x, y, w, h, t)); }
+
+class Bush {
+    constructor(x, y, r) { this.x = x; this.y = y; this.r = r; }
+    draw() {
+        if (this.x + this.r < camera.x || this.x - this.r > camera.x + camera.width ||
+            this.y + this.r < camera.y || this.y - this.r > camera.y + camera.height) return;
+
+        let grad = ctx.createRadialGradient(this.x, this.y, 4, this.x, this.y, this.r);
+        grad.addColorStop(0, '#0c2414');
+        grad.addColorStop(0.65, '#06130a');
+        grad.addColorStop(1, '#010402');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.15)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+}
+
+class Item {
+    constructor(id, x, y, type, name) {
+        this.id = id; this.x = x; this.y = y; this.type = type; this.name = name; this.collected = false;
+        this.pulse = 0;
+    }
+    draw() {
+        if (this.collected) return;
+        this.pulse += 0.05;
+        let s = 1 + Math.sin(this.pulse) * 0.12;
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        if (this.type === 'evidence') {
+            ctx.shadowColor = 'rgba(245, 158, 11, 0.8)';
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(-7*s, -7*s, 14*s, 14*s);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-3*s, 1*s, 6*s, 4*s);
+        } else if (this.type === 'primary') {
+            ctx.shadowColor = 'rgba(168, 85, 247, 0.8)';
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = '#a855f7';
+            ctx.beginPath();
+            ctx.moveTo(0, -8*s);
+            ctx.lineTo(7*s, 4*s);
+            ctx.lineTo(-7*s, 4*s);
+            ctx.closePath();
+            ctx.fill();
+        } else if (this.type === 'boat') {
+            ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#070a12';
+            ctx.beginPath();
+            ctx.moveTo(-12, -35);
+            ctx.lineTo(12, -35);
+            ctx.lineTo(20, 15);
+            ctx.lineTo(-20, 15);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-6, -8, 12, 15);
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.arc(0, -25, 3.5, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+class Searchlight {
+    constructor(x, y, radius, speed, viewDistance) {
+        this.x = x; this.y = y; this.radius = radius; this.speed = speed;
+        this.angle = 0; this.distance = viewDistance;
+        this.focalX = x; this.focalY = y;
+    }
+    update() {
+        this.angle += this.speed;
+        this.focalX = this.x + Math.cos(this.angle) * this.distance;
+        this.focalY = this.y + Math.sin(this.angle) * this.distance;
+
+        if (gameState !== 'PLAYING') return;
+        let dx = player.x - this.focalX;
+        let dy = player.y - this.focalY;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist < this.radius - 10 && !player.inBush) {
+            globalAlertLevel = Math.min(100, globalAlertLevel + 1.3);
+            if (Math.random() < 0.05) {
+                sound.playAlertRise();
+                triggerScreenShake(10, 2);
+                createAlertParticle(player.x, player.y, "HOLOFOTE DETECTADO");
+            }
+        }
+    }
+    draw() {
+        ctx.fillStyle = '#18181b';
+        ctx.fillRect(this.x - 8, this.y - 8, 16, 16);
+        ctx.strokeStyle = '#52525b';
+        ctx.strokeRect(this.x - 8, this.y - 8, 16, 16);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(254, 240, 138, 0.03)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(this.focalX, this.focalY);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+class SecurityCamera {
+    constructor(x, y, baseAngle, minAngle, maxAngle, rotSpeed) {
+        this.x = x; this.y = y; this.angle = baseAngle;
+        this.minAngle = minAngle; this.maxAngle = maxAngle;
+        this.speed = rotSpeed;
+        this.viewDistance = 180;
+        this.viewAngle = Math.PI / 6;
+    }
+    update() {
+        this.angle += this.speed;
+        if (this.angle > this.maxAngle || this.angle < this.minAngle) {
+            this.speed = -this.speed;
+        }
+
+        if (gameState !== 'PLAYING') return;
+
+        let dx = player.x - this.x;
+        let dy = player.y - this.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist < this.viewDistance && !player.inBush) {
+            let angleToPlayer = Math.atan2(dy, dx);
+            let diffAngle = Math.abs(angleToPlayer - this.angle);
+            if (diffAngle > Math.PI) diffAngle = Math.PI * 2 - diffAngle;
+
+            if (diffAngle < this.viewAngle) {
+                let blocked = false;
+                for (let wall of walls) {
+                    if (lineIntersectsRect(this.x, this.y, player.x, player.y, wall)) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (!blocked) {
+                    globalAlertLevel = Math.min(100, globalAlertLevel + 1.5);
+                    if (Math.random() < 0.05) {
+                        sound.playAlertRise();
+                        createAlertParticle(this.x, this.y, "CÂMERA ATIVA");
+                    }
+                }
+            }
+        }
+    }
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.fillStyle = '#27272a';
+        ctx.fillRect(-8, -4, 14, 8);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(5, -1.5, 2, 3);
+        ctx.restore();
+    }
+}
+
+class Guard {
+    constructor(x, y, patrolPoints, speed) {
+        this.x = x; this.y = y; this.patrolPoints = patrolPoints;
+        this.currentPointIdx = 0; this.speed = speed; this.baseSpeed = speed;
+        this.angle = 0; this.radius = 13;
+        this.state = 'PATROL'; 
+        this.targetX = x; this.targetY = y;
+        this.investigateTimer = 0;
+        this.viewAngle = Math.PI / 4.5;
+        this.viewDistance = 200;
+        this.alertTimer = 0;
+    }
+
+    update() {
+        let dxMove = 0;
+        let dyMove = 0;
+
+        if (this.state === 'PATROL') {
+            let target = this.patrolPoints[this.currentPointIdx];
+            this.targetX = target.x; this.targetY = target.y;
+
+            let dx = this.targetX - this.x;
+            let dy = this.targetY - this.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 12) {
+                this.currentPointIdx = (this.currentPointIdx + 1) % this.patrolPoints.length;
+            } else {
+                this.angle = Math.atan2(dy, dx);
+                dxMove = Math.cos(this.angle) * this.speed;
+                dyMove = Math.sin(this.angle) * this.speed;
+            }
+        } 
+        else if (this.state === 'INVESTIGATING') {
+            let dx = this.targetX - this.x;
+            let dy = this.targetY - this.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            if (dist < 12) {
+                this.investigateTimer--;
+                this.angle += 0.04; 
+                if (this.investigateTimer <= 0) {
+                    this.state = 'PATROL'; this.speed = this.baseSpeed;
+                }
+            } else {
+                this.angle = Math.atan2(dy, dx);
+                dxMove = Math.cos(this.angle) * (this.speed * 1.15);
+                dyMove = Math.sin(this.angle) * (this.speed * 1.15);
+            }
+        } 
+        else if (this.state === 'CHASING') {
+            this.targetX = player.x; this.targetY = player.y;
+            let dx = this.targetX - this.x;
+            let dy = this.targetY - this.y;
+            this.angle = Math.atan2(dy, dx);
+            dxMove = Math.cos(this.angle) * (this.speed * 1.35);
+            dyMove = Math.sin(this.angle) * (this.speed * 1.35);
+
+            if (player.inBush && !player.flashlightOn) {
+                this.state = 'INVESTIGATING'; this.targetX = player.x; this.targetY = player.y;
+                this.investigateTimer = 150;
+            }
+        }
+
+        if (dxMove !== 0 || dyMove !== 0) {
+            moveAndResolve(this, dxMove, dyMove);
+        }
+
+        this.checkVisionForPlayer();
+    }
+
+    checkVisionForPlayer() {
+        if (gameState !== 'PLAYING') return;
+        let dx = player.x - this.x;
+        let dy = player.y - this.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist > this.viewDistance) {
+            if (this.alertTimer > 0) this.alertTimer -= 0.4;
+            return;
+        }
+
+        if (player.inBush && !player.flashlightOn && this.state !== 'CHASING') {
+            if (this.alertTimer > 0) this.alertTimer -= 0.4;
+            return;
+        }
+
+        let angleToPlayer = Math.atan2(dy, dx);
+        let diffAngle = Math.abs(angleToPlayer - this.angle);
+        if (diffAngle > Math.PI) diffAngle = Math.PI * 2 - diffAngle;
+
+        if (diffAngle < this.viewAngle) {
+            let blocked = false;
+            for (let wall of walls) {
+                if (lineIntersectsRect(this.x, this.y, player.x, player.y, wall)) {
+                    blocked = true; 
+                    break;
+                }
+            }
+            if (!blocked) {
+                let modifier = player.flashlightOn ? 2.3 : 1.0;
+                this.alertTimer += 2.2 * modifier;
+                if (this.alertTimer > 35 && Math.random() < 0.05) sound.playAlertRise();
+
+                if (this.alertTimer >= 100) {
+                    this.alertTimer = 100;
+                    if (this.state !== 'CHASING') {
+                        this.state = 'CHASING';
+                        globalAlertLevel = Math.max(globalAlertLevel, 50);
+                        triggerScreenShake(18, 3.5);
+                        createAlertParticle(this.x, this.y, "ALVO EXPOSTO!");
+                    }
+                }
+                return;
+            }
+        }
+        if (this.alertTimer > 0) this.alertTimer -= 0.3;
+    }
+
+    draw() {
+        if (this.x < camera.x - 150 || this.x > camera.x + camera.width + 150 ||
+            this.y < camera.y - 150 || this.y > camera.y + camera.height + 150) return;
+
+        if (this.state === 'CHASING') {
+            ctx.save();
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 15px Courier Prime';
+            ctx.fillText("!", this.x - 3, this.y - 20);
+            ctx.restore();
+        } else if (this.state === 'INVESTIGATING') {
+            ctx.save();
+            ctx.fillStyle = '#f59e0b';
+            ctx.font = 'bold 15px Courier Prime';
+            ctx.fillText("?", this.x - 3, this.y - 20);
+            ctx.restore();
+        }
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        ctx.fillStyle = '#18181b';
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = '#3f3f46';
+        ctx.fillRect(-2, -this.radius-1, 6, 2);
+        ctx.fillRect(-2, this.radius-1, 6, 2);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(3, -2, 3, 4);
+        ctx.restore();
+    }
+}
+
+function circleRectCollision(cx, cy, radius, rect) {
+    let testX = cx; let testY = cy;
+    if (cx < rect.x) testX = rect.x;
+    else if (cx > rect.x + rect.w) testX = rect.x + rect.w;
+    if (cy < rect.y) testY = rect.y;
+    else if (cy > rect.y + rect.h) testY = rect.y + rect.h;
+
+    let distX = cx - testX; let distY = cy - testY;
+    let distance = Math.sqrt((distX * distX) + (distY * distY));
+    return distance <= radius;
+}
+
+function moveAndResolve(entity, dx, dy) {
+    entity.x += dx;
+    for (let wall of walls) {
+        if (circleRectCollision(entity.x, entity.y, entity.radius, wall)) {
+            let closestX = Math.max(wall.x, Math.min(entity.x, wall.x + wall.w));
+            let overlapX = entity.radius - Math.abs(entity.x - closestX);
+            if (overlapX > 0) {
+                entity.x += entity.x > closestX ? (overlapX + 0.1) : -(overlapX + 0.1);
+            }
+        }
+    }
+
+    entity.y += dy;
+    for (let wall of walls) {
+        if (circleRectCollision(entity.x, entity.y, entity.radius, wall)) {
+            let closestY = Math.max(wall.y, Math.min(entity.y, wall.y + wall.h));
+            let overlapY = entity.radius - Math.abs(entity.y - closestY);
+            if (overlapY > 0) {
+                entity.y += entity.y > closestY ? (overlapY + 0.1) : -(overlapY + 0.1);
+            }
+        }
+    }
+}
+
+function lineIntersectsRect(x1, y1, x2, y2, rect) {
+    let minX = Math.min(x1, x2);
+    let maxX = Math.max(x1, x2);
+    let minY = Math.min(y1, y2);
+    let maxY = Math.max(y1, y2);
+    
+    if (maxX < rect.x || minX > rect.x + rect.w || maxY < rect.y || minY > rect.y + rect.h) {
+        return false;
+    }
+
+    let pad = 0.2;
+    let rx = rect.x + pad;
+    let ry = rect.y + pad;
+    let rw = rect.w - pad * 2;
+    let rh = rect.h - pad * 2;
+
+    return lineIntersectsLine(x1, y1, x2, y2, rx, ry, rx + rw, ry) ||
+           lineIntersectsLine(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh) ||
+           lineIntersectsLine(x1, y1, x2, y2, rx + rw, ry + rh, rx, ry + rh) ||
+           lineIntersectsLine(x1, y1, x2, y2, rx, ry + rh, rx, ry);
+}
+
+function lineIntersectsLine(x1, y1, x2, y2, x3, y3, x4, y4) {
+    let denominator = ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1));
+    if (denominator === 0) return false; 
+    
+    let uA = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denominator;
+    let uB = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denominator;
+    return (uA >= 0 && uA <= 1 && uB >= 0 && uB <= 1);
+}
+
+class Particle {
+    constructor(x, y, vx, vy, color, size, life, text=null) {
+        this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+        this.color = color; this.size = size; this.life = life; this.maxLife = life;
+        this.text = text;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy; this.life--;
+    }
+    draw() {
+        let alpha = this.life / this.maxLife;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        if (this.text) {
+            ctx.fillStyle = this.color;
+            ctx.font = 'bold 10px Courier Prime';
+            ctx.fillText(this.text, this.x, this.y);
+        } else {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+function createAlertParticle(x, y, txt) {
+    particles.push(new Particle(x, y - 20, 0, -0.6, '#f87171', 0, 70, txt));
+}
+
+function createRain() {
+    let density = inputDevice === 'MOBILE' ? 1 : 2;
+    for (let i = 0; i < density; i++) {
+        let rx = camera.x + Math.random() * camera.width;
+        let ry = camera.y - 15;
+        particles.push(new Particle(rx, ry, -3.0, 11, 'rgba(148, 163, 184, 0.12)', 0.8, 90));
+    }
+}
+
+const jsStick = document.getElementById('joystick-stick');
+const jsBoundary = document.getElementById('joystick-boundary');
+
+if (jsBoundary) {
+    jsBoundary.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = jsBoundary.getBoundingClientRect();
+        
+        joystick.active = true;
+        joystick.touchId = touch.identifier;
+        joystick.startX = rect.left + rect.width / 2;
+        joystick.startY = rect.top + rect.height / 2;
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+        if (!joystick.active) return;
+        
+        let targetTouch = null;
+        for (let i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].identifier === joystick.touchId) {
+                targetTouch = e.touches[i];
+                break;
+            }
+        }
+        
+        if (!targetTouch) return;
+        
+        let dx = targetTouch.clientX - joystick.startX;
+        let dy = targetTouch.clientY - joystick.startY;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist > joystick.maxDistance) {
+            dx = (dx / dist) * joystick.maxDistance;
+            dy = (dy / dist) * joystick.maxDistance;
+            dist = joystick.maxDistance;
+        }
+
+        jsStick.style.transform = `translate(${dx}px, ${dy}px)`;
+
+        joystick.vx = dx / joystick.maxDistance;
+        joystick.vy = dy / joystick.maxDistance;
+    }, { passive: false });
+
+    window.addEventListener('touchend', (e) => {
+        if (!joystick.active) return;
+        
+        let stillActive = false;
+        for (let i = 0; i < e.touches.length; i++) {
+            if (e.touches[i].identifier === joystick.touchId) {
+                stillActive = true;
+            }
+        }
+        
+        if (!stillActive) {
+            joystick.active = false;
+            joystick.touchId = null;
+            joystick.vx = 0;
+            joystick.vy = 0;
+            jsStick.style.transform = 'translate(0px, 0px)';
+        }
+    }, { passive: false });
+}
+
+class FlyingStone {
+    constructor(startX, startY, targetX, targetY) {
+        this.startX = startX; this.startY = startY;
+        this.targetX = targetX; this.targetY = targetY;
+        this.x = startX; this.y = startY;
+        this.progress = 0;
+        this.speed = 0.04; 
+    }
+    update() {
+        this.progress += this.speed;
+        if (this.progress >= 1) {
+            this.progress = 1;
+            this.x = this.targetX;
+            this.y = this.targetY;
+            return true; 
+        }
+        this.x = this.startX + (this.targetX - this.startX) * this.progress;
+        this.y = this.startY + (this.targetY - this.startY) * this.progress;
+        return false;
+    }
+    draw() {
+        let height = Math.sin(this.progress * Math.PI) * 15;
+        let size = 3 + height * 0.25;
+
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#71717a';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y - height, size, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function throwStoneAt(targetX, targetY) {
+    if (player.rockCount > 0) {
+        player.rockCount--;
+        updateInventoryUI();
+        flyingStones.push(new FlyingStone(player.x, player.y, targetX, targetY));
+        
+        // Co-Op: Sincroniza o arremesso de pedra na rede
+        publishStoneAction(player.x, player.y, targetX, targetY);
+    }
+}
+
+canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'PLAYING' || inputDevice !== 'PC') return;
+    aimingMode = true;
+    updateAimCoordinates(e);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (!aimingMode) return;
+    updateAimCoordinates(e);
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (!aimingMode) return;
+    aimingMode = false;
+    throwStoneAt(aimTargetX, aimTargetY);
+});
+
+function updateAimCoordinates(e) {
+    const rect = canvas.getBoundingClientRect();
+    aimTargetX = (e.clientX - rect.left) * (canvas.width / rect.width) + camera.x;
+    aimTargetY = (e.clientY - rect.top) * (canvas.height / rect.height) + camera.y;
+}
+
+let btnThrow = document.getElementById('btn-throw-stone');
+if (btnThrow) {
+    btnThrow.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (gameState !== 'PLAYING') return;
+        aimingMode = true;
+        aimTargetX = player.x + Math.cos(player.angle) * 160;
+        aimTargetY = player.y + Math.sin(player.angle) * 160;
+    }, { passive: false });
+
+    btnThrow.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (!aimingMode) return;
+        aimingMode = false;
+        throwStoneAt(aimTargetX, aimTargetY);
+    }, { passive: false });
+}
+
+window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (["w","s","a","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) {
+        keys[k] = true;
+    }
+    if (k === 'f') {
+        player.flashlightOn = !player.flashlightOn;
+        sound.playTick();
+    }
+});
+window.addEventListener('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    if (["w","s","a","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)) {
+        keys[k] = false;
+    }
+});
+
+const btnFlashlight = document.getElementById('btn-toggle-flashlight');
+if (btnFlashlight) {
+    btnFlashlight.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (gameState !== 'PLAYING') return;
+        player.flashlightOn = !player.flashlightOn;
+        sound.playTick();
+    }, { passive: false });
+}
+
+function updateGame() {
+    if (gameState === 'CUTSCENE') {
+        updateCutscene();
+        return;
+    }
+    if (gameState !== 'PLAYING') return;
+
+    if (screenShake.duration > 0) {
+        screenShake.x = (Math.random() - 0.5) * screenShake.intensity;
+        screenShake.y = (Math.random() - 0.5) * screenShake.intensity;
+        screenShake.duration--;
+    } else {
+        screenShake.x = 0;
+        screenShake.y = 0;
+    }
+
+    lightningTimer--;
+    if (lightningTimer <= 0) {
+        lightningActive = true;
+        sound.playThunder();
+        triggerScreenShake(24, 7);
+        lightningTimer = 300 + Math.random() * 400;
+    } else if (lightningActive && Math.random() < 0.12) {
+        lightningActive = false;
+    }
+
+    let ax = 0; let ay = 0;
+
+    if (inputDevice === 'PC') {
+        if (keys['w'] || keys['arrowup']) ay = -1;
+        if (keys['s'] || keys['arrowdown']) ay = 1;
+        if (keys['a'] || keys['arrowleft']) ax = -1;
+        if (keys['d'] || keys['arrowright']) ax = 1;
+
+        if (ax !== 0 && ay !== 0) {
+            let len = Math.sqrt(ax*ax + ay*ay);
+            ax /= len; ay /= len;
+        }
+    } else {
+        ax = joystick.vx;
+        ay = joystick.vy;
+    }
+
+    player.vx += ax * 0.6;
+    player.vy += ay * 0.6;
+
+    player.vx *= player.friction;
+    player.vy *= player.friction;
+
+    let isMoving = Math.abs(player.vx) > 0.05 || Math.abs(player.vy) > 0.05;
+    if (isMoving) {
+        moveAndResolve(player, player.vx, player.vy);
+        player.angle = Math.atan2(player.vy, player.vx);
+        player.noiseLevel = player.flashlightOn ? 75 : 30;
+
+        if (Math.random() < 0.12 && !player.inBush) {
+            footstepRipples.push({
+                x: player.x,
+                y: player.y,
+                r: 1.5,
+                maxR: player.flashlightOn ? 70 : 35,
+                alpha: 1.0
+            });
+        }
+    } else {
+        player.noiseLevel = 0;
+    }
+
+    player.x = Math.max(player.radius + 15, Math.min(WORLD_WIDTH - player.radius - 15, player.x));
+    player.y = Math.max(player.radius + 15, Math.min(WORLD_HEIGHT - player.radius - 15, player.y));
+
+    player.inBush = false;
+    bushes.forEach(bush => {
+        let dx = player.x - bush.x; let dy = player.y - bush.y;
+        if (Math.sqrt(dx*dx + dy*dy) < bush.r) {
+            player.inBush = true;
+        }
+    });
+
+    const statusText = player.inBush && !player.flashlightOn ? "Oculto" : (player.flashlightOn ? "Lanternas ON" : "Furtivo");
+    document.getElementById('player-status').textContent = statusText;
+    const mobStatus = document.getElementById('mob-status');
+    if (mobStatus) mobStatus.textContent = statusText;
+
+    // Sincronizando dados de rede MQTT
+    syncPlayerPosition();
+
+    searchlights.forEach(sl => sl.update());
+    securityCameras.forEach(cam => cam.update());
+
+    let anyChasing = false;
+    guards.forEach(g => {
+        g.update();
+        if (g.state === 'CHASING') anyChasing = true;
+
+        let dx = player.x - g.x; let dy = player.y - g.y;
+        if (Math.sqrt(dx*dx + dy*dy) < player.radius + g.radius) {
+            triggerGameOver("Interceptado por guardas de patrulha externa");
+        }
+    });
+
+    // Multiplayer Cooperativo: Calcula nível de alerta consolidado do time ativo na sala
+    let highestPeerAlert = 0;
+    Object.values(playersInLobby).forEach(p => {
+        if (p.alertLevel > highestPeerAlert) {
+            highestPeerAlert = p.alertLevel;
+        }
+    });
+
+    if (anyChasing) {
+        globalAlertLevel = Math.min(100, globalAlertLevel + 0.35);
+    } else {
+        globalAlertLevel = Math.max(0, globalAlertLevel - 0.15);
+    }
+
+    let absoluteAlertLevel = Math.max(globalAlertLevel, highestPeerAlert);
+    highestAlert = Math.max(highestAlert, Math.round(absoluteAlertLevel));
+
+    const alertBar = document.getElementById('global-alert-bar');
+    const alertStatus = document.getElementById('alarm-status');
+    alertBar.style.width = absoluteAlertLevel + '%';
+    if (absoluteAlertLevel > 50) {
+        alertStatus.textContent = "ALERTA DA COSTA EM ALTA";
+        alertStatus.className = "text-xs text-red-500 font-extrabold animate-pulse";
+    } else {
+        alertStatus.textContent = "PATRULHA PADRÃO";
+        alertStatus.className = "text-xs text-zinc-300 font-bold";
+    }
+
+    for (let i = flyingStones.length - 1; i >= 0; i--) {
+        let s = flyingStones[i];
+        if (s.update()) {
+            sound.playStoneDrop();
+            distractions.push({
+                x: s.targetX, y: s.targetY, radius: 1, maxRadius: 180, timer: 0
+            });
+
+            guards.forEach(g => {
+                let gdx = g.x - s.targetX;
+                let gdy = g.y - s.targetY;
+                let gdist = Math.sqrt(gdx*gdx + gdy*gdy);
+                if (gdist < 180 && g.state !== 'CHASING') {
+                    g.state = 'INVESTIGATING';
+                    g.targetX = s.targetX + (Math.random() - 0.5) * 12;
+                    g.targetY = s.targetY + (Math.random() - 0.5) * 12;
+                    g.investigateTimer = 140;
+                    g.speed = g.baseSpeed * 1.2;
+                    createAlertParticle(g.x, g.y, "RUÍDO SUSPEITO");
+                }
+            });
+            flyingStones.splice(i, 1);
+        }
+    }
+
+    // Coleta cooperativa: sincroniza item pego com todos da mesma sala
+    items.forEach(item => {
+        if (item.collected) return;
+        let dx = player.x - item.x; let dy = player.y - item.y;
+        if (Math.sqrt(dx*dx + dy*dy) < player.radius + 15) {
+            item.collected = true;
+            sound.playCollect();
+            createAlertParticle(item.x, item.y, `+1 ${item.name}`);
+
+            if (item.type === 'primary') {
+                player.primaryObjectiveCompleted = true;
+                createAlertParticle(item.x, item.y, "ARQUIVOS HACKEADOS");
+            }
+            updateObjectivesUI();
+            
+            // Publica a coleta no canal real-time
+            publishCollectAction(item.id);
+        }
+    });
+
+    createRain();
+    
+    particles.forEach(p => p.update());
+    particles = particles.filter(p => p.life > 0);
+
+    footstepRipples.forEach(r => {
+        r.r += 1.4;
+        r.alpha -= 0.03;
+    });
+    footstepRipples = footstepRipples.filter(r => r.alpha > 0);
+
+    distractions.forEach(d => { d.radius += 4.0; d.timer++; });
+    distractions = distractions.filter(d => d.radius < d.maxRadius);
+
+    camera.width = canvas.width;
+    camera.height = canvas.height;
+    camera.x = player.x - camera.width / 2;
+    camera.y = player.y - camera.height / 2;
+    camera.x = Math.max(0, Math.min(WORLD_WIDTH - camera.width, camera.x));
+    camera.y = Math.max(0, Math.min(WORLD_HEIGHT - camera.height, camera.y));
+}
+
+function drawGame() {
+    if (canvas.width <= 0 || canvas.height <= 0 || !offscreenCanvas || offscreenCanvas.width <= 0 || offscreenCanvas.height <= 0) {
+        return;
+    }
+
+    ctx.fillStyle = '#010102';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(-camera.x + screenShake.x, -camera.y + screenShake.y);
+
+    ctx.fillStyle = patternGrass;
+    ctx.fillRect(45, 45, WORLD_WIDTH - 90, WORLD_HEIGHT - 90);
+
+    ctx.fillStyle = patternLab;
+    ctx.fillRect(250, 500, 400, 385);
+
+    ctx.fillStyle = patternTemple;
+    ctx.fillRect(1800, 800, 300, 335);
+
+    ctx.fillStyle = patternMansion;
+    ctx.fillRect(900, 300, 600, 435);
+
+    ctx.fillStyle = '#1c1917';
+    ctx.fillRect(WORLD_WIDTH - 250, WORLD_HEIGHT - 220, 205, 175);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.006)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < WORLD_WIDTH; x += 150) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_HEIGHT); ctx.stroke();
+    }
+    for (let y = 0; y < WORLD_HEIGHT; y += 150) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_WIDTH, y); ctx.stroke();
+    }
+
+    bushes.forEach(b => b.draw());
+    items.forEach(item => item.draw());
+    walls.forEach(w => w.draw());
+
+    // Desenha parceiros de equipe cooperativa em tempo real
+    const now = Date.now();
+    Object.values(playersInLobby).forEach(p => {
+        if (now - p.lastUpdate < 6000) {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.angle || 0);
+
+            ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI*2); ctx.fill();
+
+            ctx.fillStyle = '#060608';
+            ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+
+            ctx.fillStyle = p.color;
+            ctx.fillRect(5, -2, 3, 4);
+            ctx.restore();
+
+            ctx.save();
+            ctx.fillStyle = p.color;
+            ctx.font = 'bold 9px Courier Prime';
+            ctx.textAlign = 'center';
+            ctx.fillText(p.name, p.x, p.y - 20);
+            ctx.restore();
+        }
+    });
+
+    guards.forEach(g => g.draw());
+    searchlights.forEach(sl => sl.draw());
+    securityCameras.forEach(cam => cam.draw());
+
+    if (aimingMode) {
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(player.x, player.y);
+        ctx.lineTo(aimTargetX, aimTargetY);
+        ctx.stroke();
+        ctx.setLineDash([]); 
+
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+        ctx.beginPath();
+        ctx.arc(aimTargetX, aimTargetY, 8, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = '#f59e0b';
+        ctx.stroke();
+    }
+
+    flyingStones.forEach(s => s.draw());
+
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+
+    ctx.fillStyle = myColor;
+    ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = '#020203';
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = player.inBush ? '#10b981' : '#f59e0b';
+    ctx.fillRect(4, -3, 3, 6);
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = myColor;
+    ctx.font = 'bold 9px Courier Prime';
+    ctx.textAlign = 'center';
+    ctx.fillText(myCodename, player.x, player.y - 21);
+    ctx.restore();
+
+    distractions.forEach(d => {
+        ctx.strokeStyle = `rgba(245, 158, 11, ${1 - d.radius / d.maxRadius})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.radius, 0, Math.PI*2);
+        ctx.stroke();
+    });
+
+    footstepRipples.forEach(r => {
+        ctx.strokeStyle = `rgba(59, 130, 246, ${r.alpha})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.r, 0, Math.PI*2);
+        ctx.stroke();
+    });
+
+    ctx.restore(); 
+
+    if (!lightningActive) {
+        offscreenCtx.fillStyle = 'rgba(2, 2, 4, 0.85)';
+        offscreenCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        offscreenCtx.globalCompositeOperation = 'destination-out';
+
+        // Lanterna do jogador local
+        if (player.flashlightOn) {
+            let relPX = player.x - camera.x;
+            let relPY = player.y - camera.y;
+            let flashDist = 230;
+            let flashAngle = Math.PI / 4.2;
+
+            let grad = offscreenCtx.createRadialGradient(relPX, relPY, 4, relPX, relPY, flashDist);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+            grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.4)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            offscreenCtx.fillStyle = grad;
+            offscreenCtx.beginPath();
+            offscreenCtx.moveTo(relPX, relPY);
+            offscreenCtx.arc(relPX, relPY, flashDist, player.angle - flashAngle, player.angle + flashAngle);
+            offscreenCtx.closePath();
+            offscreenCtx.fill();
+        }
+
+        // CO-OP: Lanternas dos parceiros acesas em tempo real iluminam seu mapa!
+        Object.values(playersInLobby).forEach(p => {
+            if (p.flashlightOn && (now - p.lastUpdate < 6000)) {
+                let relPX = p.x - camera.x;
+                let relPY = p.y - camera.y;
+                let flashDist = 230;
+                let flashAngle = Math.PI / 4.2;
+
+                let grad = offscreenCtx.createRadialGradient(relPX, relPY, 4, relPX, relPY, flashDist);
+                grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+                grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.4)');
+                grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                offscreenCtx.fillStyle = grad;
+                offscreenCtx.beginPath();
+                offscreenCtx.moveTo(relPX, relPY);
+                offscreenCtx.arc(relPX, relPY, flashDist, (p.angle || 0) - flashAngle, (p.angle || 0) + flashAngle);
+                offscreenCtx.closePath();
+                offscreenCtx.fill();
+            }
+        });
+
+        // Cones de visão dos guardas
+        guards.forEach(g => {
+            let relX = g.x - camera.x;
+            let relY = g.y - camera.y;
+            if (relX < -150 || relX > canvas.width + 150 || relY < -150 || relY > canvas.height + 150) return;
+
+            let grad = offscreenCtx.createRadialGradient(relX, relY, 8, relX, relY, g.viewDistance);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            offscreenCtx.fillStyle = grad;
+            offscreenCtx.beginPath();
+            offscreenCtx.moveTo(relX, relY);
+            offscreenCtx.arc(relX, relY, g.viewDistance, g.angle - g.viewAngle, g.angle + g.viewAngle);
+            offscreenCtx.closePath();
+            offscreenCtx.fill();
+        });
+
+        securityCameras.forEach(cam => {
+            let relX = cam.x - camera.x;
+            let relY = cam.y - camera.y;
+            let grad = offscreenCtx.createRadialGradient(relX, relY, 8, relX, relY, cam.viewDistance);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            offscreenCtx.fillStyle = grad;
+            offscreenCtx.beginPath();
+            offscreenCtx.moveTo(relX, relY);
+            offscreenCtx.arc(relX, relY, cam.viewDistance, cam.angle - cam.viewAngle, cam.angle + cam.viewAngle);
+            offscreenCtx.closePath();
+            offscreenCtx.fill();
+        });
+
+        searchlights.forEach(sl => {
+            let relX = sl.focalX - camera.x;
+            let relY = sl.focalY - camera.y;
+            let grad = offscreenCtx.createRadialGradient(relX, relY, 8, relX, relY, sl.radius);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            offscreenCtx.fillStyle = grad;
+            offscreenCtx.beginPath();
+            offscreenCtx.arc(relX, relY, sl.radius, 0, Math.PI*2);
+            offscreenCtx.fill();
+        });
+
+        offscreenCtx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(offscreenCanvas, 0, 0);
+    } else {
+        ctx.fillStyle = 'rgba(219, 234, 254, 0.2)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    ctx.save();
+    ctx.translate(-camera.x, -camera.y);
+
+    guards.forEach(g => {
+        let grad = ctx.createRadialGradient(g.x, g.y, 8, g.x, g.y, g.viewDistance);
+        if (g.state === 'CHASING') {
+            grad.addColorStop(0, 'rgba(239, 68, 68, 0.22)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        } else {
+            grad.addColorStop(0, 'rgba(251, 146, 60, 0.1)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        }
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(g.x, g.y);
+        ctx.arc(g.x, g.y, g.viewDistance, g.angle - g.viewAngle, g.angle + g.viewAngle);
+        ctx.closePath();
+        ctx.fill();
+    });
+
+    searchlights.forEach(sl => {
+        let grad = ctx.createRadialGradient(sl.focalX, sl.focalY, 4, sl.focalX, sl.focalY, sl.radius);
+        grad.addColorStop(0, 'rgba(253, 224, 71, 0.15)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sl.focalX, sl.focalY, sl.radius, 0, Math.PI*2);
+        ctx.fill();
+    });
+
+    particles.forEach(p => p.draw());
+
+    ctx.restore();
+}
+
+function triggerCutscene() {
+    gameState = 'CUTSCENE';
+    cutsceneFrame = 0;
+    cutsceneTimeline = 0;
+    cutsceneYachtX = 100;
+    cutsceneYachtY = canvas.height / 2 + 30;
+    sound.stopAmbience();
+    sound.playThunder();
+}
+
+function updateCutscene() {
+    cutsceneFrame++;
+    cutsceneYachtX += 1.6; 
+    cutsceneYachtY += Math.sin(cutsceneFrame * 0.04) * 0.3; 
+
+    if (cutsceneFrame % 250 === 0) {
+        cutsceneTimeline++;
+        sound.playThunder();
+    }
+
+    if (cutsceneTimeline > 4) {
+        triggerVictory();
+    }
+}
+
+function drawCutscene() {
+    if (canvas.width <= 0 || canvas.height <= 0) {
+        return;
+    }
+
+    ctx.fillStyle = '#010103';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 5; i++) {
+        let rx = Math.random() * canvas.width;
+        let ry = Math.random() * canvas.height;
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - 12, ry + 25);
+        ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(cutsceneYachtX, cutsceneYachtY);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-22, -10, 50, 16);
+    ctx.beginPath();
+    ctx.moveTo(28, -10);
+    ctx.lineTo(40, 6);
+    ctx.lineTo(28, 6);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(-8, -22, 26, 12);
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.5)';
+    ctx.fillRect(-4, -18, 7, 7);
+    ctx.restore();
+
+    let fGrad = ctx.createLinearGradient(cutsceneYachtX + 35, cutsceneYachtY, cutsceneYachtX + 280, cutsceneYachtY + 45);
+    fGrad.addColorStop(0, 'rgba(255, 255, 255, 0.32)');
+    fGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = fGrad;
+    ctx.beginPath();
+    ctx.moveTo(cutsceneYachtX + 35, cutsceneYachtY - 4);
+    ctx.lineTo(cutsceneYachtX + 290, cutsceneYachtY - 50);
+    ctx.lineTo(cutsceneYachtX + 290, cutsceneYachtY + 80);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, canvas.height - 120, canvas.width, 120);
+    ctx.strokeStyle = '#27272a';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(0, canvas.height - 120, canvas.width, 120);
+
+    ctx.fillStyle = '#f3f4f6';
+    ctx.font = 'bold 15px Courier Prime';
+    ctx.textAlign = 'center';
+
+    let narrativeText = "";
+    if (cutsceneTimeline === 0) {
+        narrativeText = "O Iate cruza a fronteira das águas territoriais de Little St. James...";
+    } else if (cutsceneTimeline === 1) {
+        narrativeText = "Com as provas de corrupção asseguradas, o sinal da transmissão foi reestabelecido.";
+    } else if (cutsceneTimeline === 2) {
+        narrativeText = "Mais de 3 Terabytes de arquivos confidenciais vazam para redes internacionais.";
+    } else if (cutsceneTimeline === 3) {
+        narrativeText = "A conspiração caiu por tempo indeterminado. O escândalo agora expõe toda a verdade.";
+    } else if (cutsceneTimeline === 4) {
+        narrativeText = "Você desaparece sob a escuridão do oceano. Caso encerrado.";
+    }
+
+    ctx.fillText(narrativeText, canvas.width / 2, canvas.height - 65);
+
+    ctx.fillStyle = '#71717a';
+    ctx.font = '9px Courier Prime';
+    ctx.fillText("TRANSMISSÃO OPERACIONAL EM PROGRESSO... AGUARDE ENCERRAMENTO", canvas.width / 2, canvas.height - 25);
+}
+
+function updateObjectivesUI() {
+    const evidenceCollected = items.filter(i => i.type === 'evidence' && i.collected).length;
+    const hasPrimary = player.primaryObjectiveCompleted;
+
+    document.getElementById('evidence-count').textContent = `${evidenceCollected}/3`;
+    const mobEvCount = document.getElementById('mob-evidence-count');
+    if (mobEvCount) mobEvCount.textContent = `${evidenceCollected}/3`;
+
+    const objPrimary = document.getElementById('obj-primary');
+    const objEvidence = document.getElementById('obj-evidence');
+    const objEscape = document.getElementById('obj-escape');
+
+    if (hasPrimary) {
+        objPrimary.className = "flex items-start gap-2 text-green-500 line-through opacity-60";
+        objPrimary.querySelector('i').className = "fa-solid fa-square-check text-green-500";
+    } else {
+        objPrimary.className = "flex items-start gap-2 text-purple-400 font-bold animate-pulse";
+        objPrimary.querySelector('i').className = "fa-regular fa-square text-purple-500";
+    }
+
+    if (evidenceCollected === 3) {
+        objEvidence.className = "flex items-start gap-2 text-green-500 line-through opacity-60";
+        objEvidence.querySelector('i').className = "fa-solid fa-square-check text-green-500";
+    } else {
+        objEvidence.className = "flex items-start gap-2 text-zinc-300";
+        objEvidence.querySelector('i').className = "fa-regular fa-square text-zinc-600";
+    }
+
+    if (evidenceCollected === 3 && hasPrimary) {
+        objEscape.className = "flex items-start gap-2 text-amber-500 font-bold animate-pulse";
+        objEscape.querySelector('i').className = "fa-solid fa-circle-arrow-up text-amber-500";
+
+        const boatItem = items.find(i => i.type === 'boat');
+        if (boatItem) {
+            let dx = player.x - boatItem.x;
+            let dy = player.y - boatItem.y;
+            if (Math.sqrt(dx*dx + dy*dy) < 60) {
+                triggerCutscene();
+            }
+        }
+    } else {
+        objEscape.className = "flex items-start gap-2 text-zinc-600 opacity-40";
+        objEscape.querySelector('i').className = "fa-regular fa-square text-zinc-800";
+    }
+}
+
+function updateInventoryUI() {
+    const rockInv = document.getElementById('rock-inventory');
+    if (rockInv) {
+        rockInv.innerHTML = `<i class="fa-solid fa-circle mr-1 text-[8px]"></i> ${player.rockCount} / 3`;
+    }
+}
+
+function startGame() {
+    sound.init();
+    sound.startAmbience();
+
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('gameover-screen').classList.add('hidden');
+    document.getElementById('victory-screen').classList.add('hidden');
+
+    createIslandMap();
+
+    player.x = 100;
+    player.y = 1650;
+    player.vx = 0;
+    player.vy = 0;
+    player.rockCount = 3;
+    player.flashlightOn = false;
+    player.primaryObjectiveCompleted = false;
+    globalAlertLevel = 0;
+    highestAlert = 0;
+
+    gameState = 'PLAYING';
+    startTime = Date.now();
+
+    updateObjectivesUI();
+    updateInventoryUI();
+}
+
+function triggerGameOver(reason) {
+    gameState = 'GAMEOVER';
+    sound.stopAmbience();
+
+    const evCount = items.filter(i => i.type === 'evidence' && i.collected).length;
+    document.getElementById('fail-reason').textContent = reason;
+    document.getElementById('fail-evidence').textContent = `${evCount} de 3 provas seguras`;
+    document.getElementById('gameover-screen').classList.remove('hidden');
+}
+
+function triggerVictory() {
+    gameState = 'VICTORY';
+    finishTime = Date.now();
+    sound.stopAmbience();
+
+    let totalSec = Math.floor((finishTime - startTime) / 1000);
+    let min = Math.floor(totalSec / 60);
+    let sec = totalSec % 60;
+    let timeStr = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+    document.getElementById('victory-time').textContent = timeStr;
+    document.getElementById('victory-screen').classList.remove('hidden');
+}
+
+document.getElementById('choose-pc').addEventListener('click', () => {
+    inputDevice = 'PC';
+    document.getElementById('sidebar').classList.remove('hidden');
+    document.getElementById('sidebar').classList.add('flex');
+    document.getElementById('mobile-hud').classList.add('hidden');
+    document.getElementById('device-screen').classList.add('hidden');
+    
+    sound.init();
+    setupMultiplayer();
+});
+
+document.getElementById('choose-mobile').addEventListener('click', () => {
+    inputDevice = 'MOBILE';
+    document.getElementById('sidebar').classList.add('hidden');
+    document.getElementById('mobile-hud').classList.remove('hidden');
+    document.getElementById('device-screen').classList.add('hidden');
+    
+    sound.init();
+    setupMultiplayer();
+});
+
+document.querySelectorAll('.color-dot').forEach(btn => {
+    btn.addEventListener('click', () => {
+        sound.playTick();
+        document.querySelectorAll('.color-dot').forEach(b => b.classList.remove('border-white', 'scale-110'));
+        btn.classList.add('border-white', 'scale-110');
+        myColor = btn.getAttribute('data-color');
+    });
+});
+
+const firstColorDot = document.querySelector('.color-dot');
+if (firstColorDot) {
+    firstColorDot.classList.add('border-white', 'scale-110');
+    myColor = firstColorDot.getAttribute('data-color');
+}
+
+function generateTacticalRoomCode() {
+    const prefixes = ["SHADOW", "STRIKE", "VIPER", "GHOST", "RAPTOR", "PHANTOM", "COBRA", "ALPHA", "TEMPEST", "ODIN"];
+    const suffixes = ["SQUAD", "FORCE", "ECHO", "BLADE", "SABER", "HAWK", "DELTA", "OMEGA", "NIGHT", "RANGER"];
+    const randNum = Math.floor(100 + Math.random() * 900);
+    return `${prefixes[Math.floor(Math.random() * prefixes.length)]}-${suffixes[Math.floor(Math.random() * suffixes.length)]}-${randNum}`;
+}
+
+// Geração de Códigos Privados
+document.getElementById('btn-generate-code').addEventListener('click', () => {
+    sound.playTick();
+    const newCode = generateTacticalRoomCode();
+    
+    const displayBox = document.getElementById('generated-code-box');
+    const displayLbl = document.getElementById('lbl-generated-code');
+    const inputField = document.getElementById('input-custom-room');
+
+    if (displayBox && displayLbl) {
+        displayLbl.textContent = newCode;
+        displayBox.classList.remove('hidden');
+    }
+    
+    if (inputField) {
+        inputField.value = newCode;
+    }
+
+    showSystemNotification("Novo código privado gerado!", "fa-solid fa-key", "text-amber-500");
+});
+
+// Cópia de Código
+document.getElementById('btn-copy-code').addEventListener('click', () => {
+    sound.playTick();
+    const displayLbl = document.getElementById('lbl-generated-code');
+    if (displayLbl && displayLbl.textContent && displayLbl.textContent !== "NENHUM") {
+        const success = copyTextToClipboard(displayLbl.textContent);
+        if (success) {
+            showSystemNotification("Código copiado com sucesso!", "fa-solid fa-circle-check", "text-green-400");
+        } else {
+            showSystemNotification("Erro ao copiar: " + displayLbl.textContent, "fa-solid fa-circle-exclamation", "text-red-500");
+        }
+    }
+});
+
+// Entrada de código privado
+document.getElementById('btn-create-room').addEventListener('click', () => {
+    const inputField = document.getElementById('input-custom-room');
+    if (inputField && inputField.value.trim()) {
+        const customCode = inputField.value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+        if (customCode.length > 2) {
+            window.joinCoopRoom(customCode);
+        } else {
+            showSystemNotification("Insira um código com mais de 2 letras.", "fa-solid fa-triangle-exclamation", "text-red-500");
+        }
+    } else {
+        showSystemNotification("Gere ou digite um código primeiro.", "fa-solid fa-triangle-exclamation", "text-amber-500");
+    }
+});
+
+function loop() {
+    if (gameState === 'CUTSCENE') {
+        updateCutscene();
+        drawCutscene();
+    } else {
+        updateGame();
+        drawGame();
+    }
+    requestAnimationFrame(loop);
+}
+
+function resizeCanvas() {
+    const rect = canvas.parentNode.getBoundingClientRect();
+    
+    const targetWidth = Math.max(1, rect.width || 0);
+    const targetHeight = Math.max(1, rect.height || 0);
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    if (!offscreenCanvas) {
+        offscreenCanvas = document.createElement('canvas');
+    }
+    offscreenCanvas.width = targetWidth;
+    offscreenCanvas.height = targetHeight;
+    offscreenCtx = offscreenCanvas.getContext('2d');
+
+    if (gameState === 'CUTSCENE') {
+        drawCutscene();
+    } else {
+        drawGame();
+    }
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+document.getElementById('play-again-btn').addEventListener('click', startGame);
+
+document.getElementById('audio-toggle-btn').addEventListener('click', () => {
+    sound.enabled = !sound.enabled;
+    const btn = document.getElementById('audio-icon-btn');
+    const txt = document.getElementById('audio-toggle-btn');
+    if (sound.enabled) {
+        btn.className = "fa-solid fa-volume-high text-amber-500";
+        txt.innerHTML = `<i class="fa-solid fa-volume-high text-amber-500" id="audio-icon-btn"></i> Áudio Ativo`;
+        sound.init();
+        if (gameState === 'PLAYING') sound.startAmbience();
+    } else {
+        btn.className = "fa-solid fa-volume-xmark text-zinc-500";
+        txt.innerHTML = `<i class="fa-solid fa-volume-xmark text-zinc-500" id="audio-icon-btn"></i> Áudio Mudo`;
+        sound.stopAmbience();
+    }
+});
+
+window.onload = function() {
+    resizeCanvas();
+    initTextures(); 
+    createIslandMap();
+    loop();
+};
+</script>
+</body>
+</html>
