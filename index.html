@@ -150,12 +150,11 @@
                 <span class="flex items-center gap-1.5"><i class="fa-solid fa-hands-holding-circle text-amber-500 text-[10px]"></i> Pedras de Distração:</span>
                 <span id="rock-inventory" class="text-amber-500 font-mono font-bold">3 / 3</span>
             </div>
-            <!-- SLOT DE ITEM ESPECIAL NA DESKTOP HUD -->
+            <!-- SLOT DE ITEM ESPECIAL -->
             <div class="flex justify-between items-center text-xs text-zinc-400 border-t border-zinc-900/60 pt-2.5">
                 <span class="flex items-center gap-1.5"><i class="fa-solid fa-toolbox text-purple-500 text-[10px]"></i> Item Especial:</span>
                 <span id="special-item-ui" class="text-zinc-500 font-mono font-bold uppercase">Nenhum</span>
             </div>
-            <!-- Indicador do Botão de Corrida no PC -->
             <div class="text-[9px] text-zinc-600 retro-font leading-normal">
                 <i class="fa-solid fa-circle-info mr-1"></i> Dica: Segure <span class="bg-zinc-900 border border-zinc-800 px-1 text-zinc-400 rounded">SHIFT</span> para correr.
             </div>
@@ -232,7 +231,7 @@
                         <i class="fa-solid fa-lightbulb text-lg"></i>
                         <span class="text-[7px] font-bold uppercase mt-0.5">Lanterna</span>
                     </button>
-                    <!-- BOTÃO CONTEXTUAL DE ITEM ESPECIAL NO MOBILE -->
+                    <!-- BOTÃO DE ITEM ESPECIAL MOBILE -->
                     <button id="btn-use-item" class="w-14 h-14 bg-purple-900/90 active:bg-purple-800/95 text-white rounded-full flex flex-col items-center justify-center shadow-lg border border-purple-700/50 hidden transition-all">
                         <i class="fa-solid fa-wind text-lg" id="btn-use-item-icon"></i>
                         <span class="text-[7px] font-bold uppercase mt-0.5" id="btn-use-item-text">Usar</span>
@@ -312,7 +311,6 @@
 
                 <!-- Navegador de Servidores Reais -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <!-- Servidores Oficiais com Pings de Verdade -->
                     <div class="bg-zinc-900/50 border border-zinc-850 p-4 rounded-xl flex flex-col space-y-3 shadow-lg">
                         <h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
                             <span><i class="fa-solid fa-globe mr-1.5 text-blue-500"></i> Canais Globais Ativos</span>
@@ -640,7 +638,6 @@ class SoundController {
             const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
             const output = noiseBuffer.getChannelData(0);
             
-            // Gerador de Ruído Rosa/Marrom para tempestade
             let lastOut = 0.0;
             for (let i = 0; i < bufferSize; i++) {
                 const white = Math.random() * 2 - 1;
@@ -875,11 +872,9 @@ let isOnline = false;
 let roomListRegistry = {};
 let lastMqttHeartbeat = Date.now();
 let pingInterval = null;
-let pingTestTimers = {};
 
 const officialServersList = ["SAO-PAULO-BR", "VIRGINIA-US", "FRANKFURT-EU", "TOKYO-JP"];
 
-// Função segura para copiar texto no preview (iFrame)
 function copyTextToClipboard(text) {
     const textArea = document.createElement("textarea");
     textArea.value = text;
@@ -898,7 +893,6 @@ function copyTextToClipboard(text) {
     return success;
 }
 
-// Mostra notificações sem quebrar com alerts tradicionais
 function showSystemNotification(text, iconClass = "fa-solid fa-circle-info", iconColorClass = "text-blue-400") {
     const box = document.getElementById('sys-notification');
     const txt = document.getElementById('notification-text');
@@ -937,10 +931,8 @@ function setupMultiplayer() {
             netStatus.textContent = "CONEXÃO ATIVA - SELECIONE CANAL";
             netStatus.className = "text-[10px] text-green-500 mt-1 uppercase font-bold";
             
-            // Exibe o medidor de latência tático
             document.getElementById('latency-indicator').classList.remove('hidden');
 
-            // Inscreve na escuta das salas e pings de rede
             mqttClient.subscribe('stjames/coop/rooms/registry/+', (err) => {
                 if (err) console.error("Falha ao escutar registro de salas:", err);
             });
@@ -948,9 +940,7 @@ function setupMultiplayer() {
                 if (err) console.error("Falha ao se registrar para testes de ping:", err);
             });
 
-            // Inicia monitoramento de ping
             setupPingMonitor();
-            // Dispara testes iniciais de ping em todos os servidores oficiais
             runGlobalPingProbes();
         });
 
@@ -958,7 +948,7 @@ function setupMultiplayer() {
             try {
                 const payload = JSON.parse(message.toString());
                 
-                // Trata pings de retorno (Echos) de latência dos servidores
+                // Trata echos de latência do ping tático
                 if (topic.startsWith(`stjames/coop/rooms/pingresponse/${myUid}/`)) {
                     const serverId = topic.replace(`stjames/coop/rooms/pingresponse/${myUid}/`, '');
                     const sentTime = payload.sentTime;
@@ -980,13 +970,19 @@ function setupMultiplayer() {
                     const senderId = topic.split('/').pop();
                     if (senderId !== myUid) {
                         if (payload.type === 'state') {
+                            // Salva a última posição conhecida do jogador e as novas coordenadas de rede (alvos)
+                            const existing = playersInLobby[senderId];
                             playersInLobby[senderId] = {
                                 uid: senderId,
                                 name: payload.name,
                                 color: payload.color,
-                                x: payload.x,
-                                y: payload.y,
-                                angle: payload.angle,
+                                targetX: payload.x,
+                                targetY: payload.y,
+                                targetAngle: payload.angle,
+                                // Inicializa com a coordenada recebida se for novo para evitar pulos na tela
+                                x: existing ? existing.x : payload.x,
+                                y: existing ? existing.y : payload.y,
+                                angle: existing ? existing.angle : payload.angle,
                                 flashlightOn: payload.flashlightOn,
                                 status: payload.status,
                                 alertLevel: payload.alertLevel,
@@ -1053,13 +1049,11 @@ function runGlobalPingProbes() {
     if (!isOnline || !mqttClient) return;
 
     officialServersList.forEach(serverId => {
-        // Envia mensagem para testar latência. O broker enviará de volta
         const probeTopic = `stjames/coop/rooms/pingresponse/${myUid}/${serverId}`;
         mqttClient.publish(probeTopic, JSON.stringify({ sentTime: Date.now() }), { qos: 0 });
     });
 
-    // Repete o teste de latência dos servidores oficiais a cada 6 segundos
-    setTimeout(runGlobalPingProbes, 6000);
+    setTimeout(runGlobalPingProbes, 5000);
 }
 
 function updateServerCardPing(serverId, rtt) {
@@ -1172,7 +1166,7 @@ window.joinCoopRoom = function(roomId) {
             }
         }, 3000);
 
-        showSystemNotification(`Frequência conectada em ${activeRoomId}!`, "fa-solid fa-circle-check", "text-green-400");
+        showSystemNotification(`Frequência sintonizada em ${activeRoomId}!`, "fa-solid fa-circle-check", "text-green-400");
     }
 
     document.getElementById('room-screen').classList.add('hidden');
@@ -1289,8 +1283,8 @@ let startTime = 0;
 let finishTime = 0;
 let highestAlert = 0;
 
-let activeSmokeClouds = []; // Nuvem tática de cobertura visual
-let activeEmpShockwaves = []; // Ondas de interferência eletromagnética
+let activeSmokeClouds = []; 
+let activeEmpShockwaves = []; 
 
 const joystick = {
     active: false,
@@ -1321,10 +1315,9 @@ const player = {
     noiseLevel: 0,
     primaryObjectiveCompleted: false,
     
-    // Propriedades especiais de jogabilidade
-    equippedItem: null, // 'smoke_bomb', 'emp', 'adrenaline'
-    adrenalineTimer: 0, // timer de aceleração sem som
-    inSmoke: false // flag de cobertura de fumaça ativa
+    equippedItem: null, 
+    adrenalineTimer: 0, 
+    inSmoke: false 
 };
 
 const keys = {};
@@ -1440,7 +1433,6 @@ function createIslandMap() {
     waterSplashes = [];
     desactivatedGeneratorsCount = 0;
     
-    // Reseta estados de itens do jogador
     player.equippedItem = null;
     player.adrenalineTimer = 0;
     player.inSmoke = false;
@@ -1453,13 +1445,11 @@ function createIslandMap() {
     if (primaryDesc) primaryDesc.textContent = mySelectedObjective.desc;
     if (spIndicator) spIndicator.textContent = `OBJETIVO: ${mySelectedObjective.desc}`;
 
-    // Paredes Limitrofes
     addWall(0, 0, WORLD_WIDTH, 50, "coast");
     addWall(0, 0, 50, WORLD_HEIGHT, "coast");
     addWall(WORLD_WIDTH - 50, 0, 50, WORLD_HEIGHT, "coast");
     addWall(0, WORLD_HEIGHT - 50, WORLD_WIDTH, 50, "coast");
 
-    // Mansão Central (Área Premium)
     const mX = 900, mY = 300;
     addWall(mX, mY, 220, 40, "mansion"); 
     addWall(mX + 340, mY, 260, 40, "mansion"); 
@@ -1469,21 +1459,18 @@ function createIslandMap() {
     addWall(mX, mY + 400, 200, 40, "mansion"); 
     addWall(mX + 360, mY + 400, 240, 40, "mansion"); 
 
-    // Templo Leste
     const tX = 1800, tY = 800;
     addWall(tX, tY, 100, 40, "temple");
     addWall(tX + 180, tY, 120, 40, "temple"); 
     addWall(tX, tY, 40, 320, "temple");
     addWall(tX + 260, tY, 40, 320, "temple");
 
-    // Laboratório Oeste
     const lX = 250, lY = 500;
     addWall(lX, lY, 140, 40, "lab");
     addWall(lX + 240, lY, 160, 40, "lab"); 
     addWall(lX, lY, 40, 350, "lab");
     addWall(lX + 360, lY, 40, 350, "lab");
 
-    // Vegetação Arbustiva (Para furtividade do Agente)
     const bushPositions = [
         {x: 150, y: 1400, r: 55}, {x: 230, y: 1300, r: 60}, {x: 180, y: 1050, r: 50},
         {x: 120, y: 900, r: 50}, {x: 350, y: 1000, r: 65}, {x: 420, y: 1250, r: 55},
@@ -1506,7 +1493,6 @@ function createIslandMap() {
     items.push(new Item('item-adrenaline-1', 1100, 950, 'adrenaline_item', 'Adrenalina'));
     items.push(new Item('item-adrenaline-2', 1900, 300, 'adrenaline_item', 'Adrenalina'));
 
-    // Adiciona objetivos secundários para a Missão 2 (Geradores)
     const subTasks = document.getElementById('obj-subtasks');
     if (activeMission === 2) {
         subTasks.classList.remove('hidden');
@@ -1517,18 +1503,15 @@ function createIslandMap() {
         subTasks.classList.add('hidden');
     }
 
-    // Configurando Guardas (Patrulhas inteligentes)
     guards.push(new Guard(400, 1500, [{x: 400, y: 1500}, {x: 800, y: 1500}], 2.3));
     guards.push(new Guard(200, 1000, [{x: 200, y: 1000}, {x: 550, y: 1000}], 2.5));
     guards.push(new Guard(1050, 200, [{x: 800, y: 200}, {x: 1300, y: 200}], 2.4));
     guards.push(new Guard(1000, 500, [{x: 1000, y: 500}, {x: 1400, y: 500}], 2.8));
     guards.push(new Guard(1650, 1000, [{x: 1650, y: 1000}, {x: 2150, y: 1000}], 2.6));
 
-    // Holofotes de Longo Alcance
     searchlights.push(new Searchlight(750, 750, 160, 0.005, 180));
     searchlights.push(new Searchlight(1650, 450, 170, -0.004, 200));
 
-    // Câmeras de Vigilância Rotativas
     securityCameras.push(new SecurityCamera(900, 430, 0, -Math.PI/3.5, Math.PI/3.5, 0.008));
     securityCameras.push(new SecurityCamera(1480, 430, Math.PI, Math.PI*3.2/4, Math.PI*4.8/4, 0.006));
 }
@@ -1542,7 +1525,6 @@ class Wall {
             this.y + this.h < camera.y - 50 || this.y > camera.y + camera.height + 50) return;
 
         ctx.save();
-        // Sombra suave sob as paredes para efeito de profundidade 3D
         if (graphicsQuality === 'HIGH') {
             ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
             ctx.shadowBlur = 10;
@@ -1568,7 +1550,6 @@ class Wall {
         ctx.fillRect(this.x, this.y, this.w, this.h);
         ctx.strokeRect(this.x, this.y, this.w, this.h);
 
-        // Brilho Neon Sutil no topo das estruturas
         ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
         ctx.fillRect(this.x + 2, this.y + 2, this.w - 4, this.h - 4);
         ctx.restore();
@@ -1685,7 +1666,7 @@ class Searchlight {
         this.angle = 0; this.distance = viewDistance;
         this.focalX = x; this.focalY = y;
         this.disabled = false;
-        this.disabledTimer = 0; // timer de bloqueio por EMP
+        this.disabledTimer = 0; 
     }
     update() {
         if (activeMission === 2 && desactivatedGeneratorsCount >= 3) {
@@ -1693,7 +1674,7 @@ class Searchlight {
         }
 
         if (this.disabled && !this.disabledTimer) return;
-        if (this.disabled && this.disabledTimer > 0) return; // bloqueio EMP ativo
+        if (this.disabled && this.disabledTimer > 0) return; 
 
         this.angle += this.speed;
         this.focalX = this.x + Math.cos(this.angle) * this.distance;
@@ -1741,7 +1722,7 @@ class SecurityCamera {
         this.viewDistance = 180;
         this.viewAngle = Math.PI / 6.5;
         this.disabled = false;
-        this.disabledTimer = 0; // timer de desativação por EMP
+        this.disabledTimer = 0; 
     }
     update() {
         if (this.disabled) return;
@@ -2160,7 +2141,6 @@ function throwStoneAt(targetX, targetY) {
         updateInventoryUI();
         flyingStones.push(new FlyingStone(player.x, player.y, targetX, targetY));
         
-        // Co-Op: Sincroniza o arremesso de pedra na rede
         publishStoneAction(player.x, player.y, targetX, targetY);
     }
 }
@@ -2206,7 +2186,6 @@ if (btnThrow) {
     }, { passive: false });
 }
 
-// Botão mobile de corrida (Sprint)
 const btnMobileSprint = document.getElementById('btn-mobile-sprint');
 if (btnMobileSprint) {
     btnMobileSprint.addEventListener('touchstart', (e) => {
@@ -2235,7 +2214,7 @@ function useEquippedItem() {
             radius: 5,
             maxRadius: 150,
             timer: 0,
-            life: 350 // dura cerca de 6 segundos
+            life: 350 
         });
         createAlertParticle(player.x, player.y, "FUMAÇA LANÇADA");
         
@@ -2271,7 +2250,7 @@ function useEquippedItem() {
     } 
     else if (itemUsed === 'adrenaline') {
         sound.playAdrenalineBoost();
-        player.adrenalineTimer = 300; // 5 segundos a 60fps
+        player.adrenalineTimer = 300; 
         createAlertParticle(player.x, player.y, "ADRENALINA ATIVADA!");
     }
 }
@@ -2281,7 +2260,7 @@ function disableElectronicsNear(tx, ty, radius) {
         let dx = cam.x - tx; let dy = cam.y - ty;
         if (Math.sqrt(dx*dx + dy*dy) < radius) {
             cam.disabled = true;
-            cam.disabledTimer = 600; // 10 segundos inoperante
+            cam.disabledTimer = 600; 
             createAlertParticle(cam.x, cam.y, "SISTEMA DESATIVADO");
         }
     });
@@ -2289,7 +2268,7 @@ function disableElectronicsNear(tx, ty, radius) {
         let dx = sl.focalX - tx; let dy = sl.focalY - ty;
         if (Math.sqrt(dx*dx + dy*dy) < radius) {
             sl.disabled = true;
-            sl.disabledTimer = 600; // 10 segundos inoperante
+            sl.disabledTimer = 600; 
             createAlertParticle(sl.x, sl.y, "RETRANSMISSÃO FORÇADA");
         }
     });
@@ -2375,7 +2354,6 @@ if (btnFlashlight) {
     }, { passive: false });
 }
 
-// Botão mobile de uso de itens
 const btnMobileItem = document.getElementById('btn-use-item');
 if (btnMobileItem) {
     btnMobileItem.addEventListener('touchstart', (e) => {
@@ -2384,7 +2362,6 @@ if (btnMobileItem) {
     }, { passive: false });
 }
 
-// Botão de pausa na HUD
 document.getElementById('btn-pause-trigger').addEventListener('click', (e) => {
     e.stopPropagation();
     togglePause();
@@ -2409,7 +2386,6 @@ function updateGame() {
     }
     if (gameState !== 'PLAYING') return;
 
-    // Screen Shake dinâmico
     if (screenShake.duration > 0) {
         screenShake.x = (Math.random() - 0.5) * screenShake.intensity;
         screenShake.y = (Math.random() - 0.5) * screenShake.intensity;
@@ -2419,7 +2395,6 @@ function updateGame() {
         screenShake.y = 0;
     }
 
-    // Trovões táticos
     lightningTimer--;
     if (lightningTimer <= 0) {
         lightningActive = true;
@@ -2434,7 +2409,7 @@ function updateGame() {
         player.adrenalineTimer--;
     }
 
-    // Processamento de fumaças
+    // Cobertura visual da fumaça
     player.inSmoke = false;
     activeSmokeClouds.forEach(sm => {
         sm.life--;
@@ -2448,7 +2423,6 @@ function updateGame() {
     });
     activeSmokeClouds = activeSmokeClouds.filter(sm => sm.life > 0);
 
-    // Processamento de ondas de choque EMP
     activeEmpShockwaves.forEach(emp => {
         if (emp.radius < emp.maxRadius) {
             emp.radius += 10;
@@ -2456,7 +2430,6 @@ function updateGame() {
     });
     activeEmpShockwaves = activeEmpShockwaves.filter(emp => emp.radius < emp.maxRadius);
 
-    // Atualiza desativação de eletrônicos
     securityCameras.forEach(cam => {
         if (cam.disabled) {
             cam.disabledTimer--;
@@ -2493,10 +2466,9 @@ function updateGame() {
         ay = joystick.vy;
     }
 
-    // Aceleração fluida baseada em Sprint (Corrida) e Adrenalina
     let currentSpeed = player.isSprinting ? player.sprintSpeed : player.speed;
     if (player.adrenalineTimer > 0) {
-        currentSpeed = 7.0; // Boost extremo silencioso
+        currentSpeed = 7.0; 
     }
     
     player.vx += ax * 0.65;
@@ -2510,7 +2482,6 @@ function updateGame() {
         moveAndResolve(player, player.vx * (currentSpeed/player.speed), player.vy * (currentSpeed/player.speed));
         player.angle = Math.atan2(player.vy, player.vx);
         
-        // Ajuste no volume de ruído mecânico (totalmente silenciado pela adrenalina)
         player.noiseLevel = player.adrenalineTimer > 0 ? 0 : (player.isSprinting ? 95 : (player.flashlightOn ? 65 : 25));
 
         if (Math.random() < (player.isSprinting ? 0.35 : 0.12) && !player.inBush && player.adrenalineTimer <= 0) {
@@ -2529,7 +2500,6 @@ function updateGame() {
     player.x = Math.max(player.radius + 15, Math.min(WORLD_WIDTH - player.radius - 15, player.x));
     player.y = Math.max(player.radius + 15, Math.min(WORLD_HEIGHT - player.radius - 15, player.y));
 
-    // Arbusto Furtivo (Cobertura compartilhada com a fumaça lançada)
     player.inBush = false;
     bushes.forEach(bush => {
         let dx = player.x - bush.x; let dy = player.y - bush.y;
@@ -2539,7 +2509,7 @@ function updateGame() {
     });
 
     if (player.inSmoke) {
-        player.inBush = true; // esconde dos guardas no raio da fumaça
+        player.inBush = true; 
     }
 
     const statusText = player.inSmoke ? "Sob Fumaça" : (player.inBush && !player.flashlightOn ? "Oculto" : (player.adrenalineTimer > 0 ? "Adrenalina!" : (player.isSprinting ? "Correndo" : (player.flashlightOn ? "Lanterna Ativa" : "Furtivo"))));
@@ -2547,14 +2517,13 @@ function updateGame() {
     const mobStatus = document.getElementById('mob-status');
     if (mobStatus) mobStatus.textContent = statusText;
 
-    // Altera barra de ruído da UI
     const noiseBar = document.getElementById('noise-bar');
     const noiseText = document.getElementById('noise-text');
     if (noiseBar && noiseText) {
         noiseBar.style.width = `${player.noiseLevel}%`;
         if (player.noiseLevel > 80) {
             noiseText.textContent = "ALERTA - RUÍDO FORTE";
-            noiseText.className = "text-red-500 font-extrabold animate-pulse";
+            noiseText.className = "text-red-500 font-bold animate-pulse";
         } else if (player.noiseLevel > 40) {
             noiseText.textContent = "RUÍDO SUTIL";
             noiseText.className = "text-amber-500 font-bold";
@@ -2564,7 +2533,25 @@ function updateGame() {
         }
     }
 
+    // Sincroniza dados via rádio/MQTT
     syncPlayerPosition();
+
+    // INTERPOLAÇÃO DE OUTROS PLAYERS CO-OP (60 FPS BUTTERY SMOOTH)
+    // Isso remove totalmente o lag e o travamento visual de peer-to-peer!
+    const now = Date.now();
+    Object.values(playersInLobby).forEach(p => {
+        if (now - p.lastUpdate < 6000) {
+            // Suavização das posições cartesianas (Lerp)
+            p.x += (p.targetX - p.x) * 0.15;
+            p.y += (p.targetY - p.y) * 0.15;
+            
+            // Suavização do ângulo de rotação (ajuste de ciclo trigonométrico)
+            let angleDiff = p.targetAngle - p.angle;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            p.angle += angleDiff * 0.15;
+        }
+    });
 
     searchlights.forEach(sl => sl.update());
     securityCameras.forEach(cam => cam.update());
@@ -2580,7 +2567,6 @@ function updateGame() {
         }
     });
 
-    // Multiplayer: Consolidando alerta geral
     let highestPeerAlert = 0;
     Object.values(playersInLobby).forEach(p => {
         if (p.alertLevel > highestPeerAlert) {
@@ -2612,7 +2598,6 @@ function updateGame() {
         if (vignetteEff) vignetteEff.className = "absolute inset-0 pointer-events-none vignette transition-all duration-300";
     }
 
-    // Atualização de trajetórias de pedras
     for (let i = flyingStones.length - 1; i >= 0; i--) {
         let s = flyingStones[i];
         if (s.update()) {
@@ -2638,13 +2623,11 @@ function updateGame() {
         }
     }
 
-    // Coleta tática de objetivos cooperativos e itens especiais
     items.forEach(item => {
         if (item.collected) return;
         let dx = player.x - item.x; let dy = player.y - item.y;
         if (Math.sqrt(dx*dx + dy*dy) < player.radius + 15) {
             
-            // Se coletar item especial, armazena no slot especial
             if (['smoke_bomb_item', 'emp_item', 'adrenaline_item'].includes(item.type)) {
                 let formattedName = item.type.replace('_item', '');
                 player.equippedItem = formattedName;
@@ -2720,7 +2703,6 @@ function drawGame() {
     ctx.fillStyle = patternMansion;
     ctx.fillRect(900, 300, 600, 440);
 
-    // Grid cibernético tático sutil
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.005)';
     ctx.lineWidth = 1;
     for (let x = 0; x < WORLD_WIDTH; x += 150) {
@@ -2734,7 +2716,7 @@ function drawGame() {
     items.forEach(item => item.draw());
     walls.forEach(w => w.draw());
 
-    // Desenha parceiros de equipe cooperativa em tempo real
+    // Desenha outros jogadores com suas coordenadas interpoladas (fluidez excepcional)
     const now = Date.now();
     Object.values(playersInLobby).forEach(p => {
         if (now - p.lastUpdate < 6000) {
@@ -2765,7 +2747,6 @@ function drawGame() {
     searchlights.forEach(sl => sl.draw());
     securityCameras.forEach(cam => cam.draw());
 
-    // Linha de mira ao arremessar pedras
     if (aimingMode) {
         ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
         ctx.lineWidth = 1.5;
@@ -2793,7 +2774,6 @@ function drawGame() {
     ctx.fillStyle = myColor;
     ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI*2); ctx.fill();
 
-    // Brilho na cor magenta ao redor do agente caso adrenalina esteja ativa
     if (player.adrenalineTimer > 0) {
         ctx.strokeStyle = '#ec4899';
         ctx.lineWidth = 3;
@@ -2857,14 +2837,13 @@ function drawGame() {
 
     ctx.restore(); 
 
-    // Blending de Máscara de Iluminação Volumétrica
+    // Máscaras de Iluminação Dinâmicas
     if (!lightningActive) {
         offscreenCtx.fillStyle = 'rgba(2, 2, 4, 0.88)';
         offscreenCtx.fillRect(0, 0, canvas.width, canvas.height);
 
         offscreenCtx.globalCompositeOperation = 'destination-out';
 
-        // Lanterna do jogador local
         if (player.flashlightOn) {
             let relPX = player.x - camera.x;
             let relPY = player.y - camera.y;
@@ -2884,7 +2863,7 @@ function drawGame() {
             offscreenCtx.fill();
         }
 
-        // CO-OP: Lanternas dos parceiros acesas em tempo real iluminam seu mapa!
+        // Iluminação compartilhada das lanternas dos aliados (totalmente fluida via interpolação de posições)
         Object.values(playersInLobby).forEach(p => {
             if (p.flashlightOn && (now - p.lastUpdate < 6000)) {
                 let relPX = p.x - camera.x;
@@ -2906,7 +2885,6 @@ function drawGame() {
             }
         });
 
-        // Cones de visão dos guardas
         guards.forEach(g => {
             let relX = g.x - camera.x;
             let relY = g.y - camera.y;
@@ -2924,7 +2902,6 @@ function drawGame() {
             offscreenCtx.fill();
         });
 
-        // Visão das Câmeras
         securityCameras.forEach(cam => {
             let relX = cam.x - camera.x;
             let relY = cam.y - camera.y;
@@ -2940,7 +2917,6 @@ function drawGame() {
             offscreenCtx.fill();
         });
 
-        // Holofotes de Longa distância
         searchlights.forEach(sl => {
             if (sl.disabled) return;
             let relX = sl.focalX - camera.x;
@@ -2965,7 +2941,6 @@ function drawGame() {
     ctx.save();
     ctx.translate(-camera.x, -camera.y);
 
-    // Adiciona glow de coloração nos cones de visão dos guardas em tempo real
     guards.forEach(g => {
         let grad = ctx.createRadialGradient(g.x, g.y, 8, g.x, g.y, g.viewDistance);
         if (g.state === 'CHASING') {
@@ -3005,13 +2980,13 @@ function updateCutscene() {
     cutsceneYachtX += 1.45; 
     cutsceneYachtY += Math.sin(cutsceneFrame * 0.03) * 0.35; 
 
-    // Helicóptero de segurança perseguindo com holofote passando perto
     cutsceneHelicopterX += 1.7;
     cutsceneHelicopterY += Math.sin(cutsceneFrame * 0.015) * 0.6;
 
     if (cutsceneFrame % 250 === 0) {
         cutsceneTimeline++;
         sound.playThunder();
+        triggerScreenShake(20, 6);
     }
 
     if (cutsceneTimeline > 5) {
@@ -3025,7 +3000,6 @@ function drawCutscene() {
     ctx.fillStyle = '#010103';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Gotas de Tempestade densas na Cutscene
     for (let i = 0; i < 8; i++) {
         let rx = Math.random() * canvas.width;
         let ry = Math.random() * canvas.height;
@@ -3037,7 +3011,6 @@ function drawCutscene() {
         ctx.stroke();
     }
 
-    // Desenha o Iate fugindo nas ondas escuras
     ctx.save();
     ctx.translate(cutsceneYachtX, cutsceneYachtY);
     ctx.fillStyle = '#ffffff';
@@ -3055,7 +3028,6 @@ function drawCutscene() {
     ctx.fillRect(-4, -18, 7, 7);
     ctx.restore();
 
-    // Rastro da Hélice do Iate na Água Escura
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -3063,14 +3035,12 @@ function drawCutscene() {
     ctx.lineTo(cutsceneYachtX - 180, cutsceneYachtY + 4);
     ctx.stroke();
 
-    // Desenha Helicóptero de Patrulha Militar na retaguarda
     ctx.save();
     ctx.translate(cutsceneHelicopterX, cutsceneHelicopterY);
     ctx.fillStyle = '#111827';
     ctx.fillRect(-20, -6, 35, 12);
     ctx.fillStyle = '#4b5563';
     ctx.fillRect(-35, -2, 15, 4);
-    // Hélice girando de forma borrada
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -3078,7 +3048,6 @@ function drawCutscene() {
     ctx.stroke();
     ctx.restore();
 
-    // Cone de Holofote do Helicóptero cruzando dramaticamente o mar
     let fGrad = ctx.createLinearGradient(cutsceneHelicopterX, cutsceneHelicopterY, cutsceneHelicopterX + 220, cutsceneHelicopterY + 120);
     fGrad.addColorStop(0, 'rgba(254, 240, 138, 0.22)');
     fGrad.addColorStop(1, 'rgba(0,0,0,0)');
@@ -3090,7 +3059,6 @@ function drawCutscene() {
     ctx.closePath();
     ctx.fill();
 
-    // Caixa de Legenda de Diálogos
     ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
     ctx.fillRect(0, canvas.height - 130, canvas.width, 130);
     ctx.strokeStyle = '#27272a';
@@ -3131,7 +3099,6 @@ function updateObjectivesUI() {
     const mobEvCount = document.getElementById('mob-evidence-count');
     if (mobEvCount) mobEvCount.textContent = `${evidenceCollected}/3`;
 
-    // Sincroniza contador de geradores se for Missão 2
     if (activeMission === 2) {
         document.getElementById('generator-count').textContent = `${desactivatedGeneratorsCount}/3`;
     }
@@ -3167,7 +3134,6 @@ function updateObjectivesUI() {
         objEvidence.querySelector('i').className = "fa-regular fa-square text-zinc-600";
     }
 
-    // Escape condicionado à missão ativa
     let canEscape = false;
     if (activeMission === 2) {
         canEscape = (evidenceCollected === 3 && hasPrimary && desactivatedGeneratorsCount >= 3);
@@ -3290,7 +3256,6 @@ document.querySelectorAll('.mission-card-btn').forEach(card => {
     });
 });
 
-// Opções de Qualidade Gráfica no Menu de Pausa
 document.querySelectorAll('.graphics-option-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         sound.playTick();
@@ -3301,7 +3266,6 @@ document.querySelectorAll('.graphics-option-btn').forEach(btn => {
     });
 });
 
-// Controles de volume
 document.getElementById('volume-master-slider').addEventListener('input', (e) => {
     sound.masterVolume = e.target.value / 100;
     sound.updateVolumes();
@@ -3311,7 +3275,6 @@ document.getElementById('volume-sfx-slider').addEventListener('input', (e) => {
     sound.sfxVolume = e.target.value / 100;
 });
 
-// Retomar / Sair no Menu de Pause
 document.getElementById('btn-resume-game').addEventListener('click', () => {
     togglePause();
 });
@@ -3345,7 +3308,6 @@ function generateTacticalRoomCode() {
     return `${prefixes[Math.floor(Math.random() * prefixes.length)]}-${suffixes[Math.floor(Math.random() * suffixes.length)]}-${randNum}`;
 }
 
-// Geração de Códigos Privados
 document.getElementById('btn-generate-code').addEventListener('click', () => {
     sound.playTick();
     const newCode = generateTacticalRoomCode();
@@ -3366,7 +3328,6 @@ document.getElementById('btn-generate-code').addEventListener('click', () => {
     showSystemNotification("Novo canal tático de rádio gerado!", "fa-solid fa-key", "text-amber-500");
 });
 
-// Cópia de Código
 document.getElementById('btn-copy-code').addEventListener('click', () => {
     sound.playTick();
     const displayLbl = document.getElementById('lbl-generated-code');
@@ -3380,7 +3341,6 @@ document.getElementById('btn-copy-code').addEventListener('click', () => {
     }
 });
 
-// Entrada de código privado
 document.getElementById('btn-create-room').addEventListener('click', () => {
     const inputField = document.getElementById('input-custom-room');
     if (inputField && inputField.value.trim()) {
@@ -3460,7 +3420,6 @@ window.onload = function() {
     createIslandMap();
     loop();
 
-    // Seta qualidade inicial padrão na UI do pause
     const initialQualityBtn = document.querySelector('[data-quality="HIGH"]');
     if (initialQualityBtn) {
         initialQualityBtn.classList.add('border-red-500', 'bg-zinc-800');
